@@ -287,7 +287,7 @@ public class PlatformConfigurationUtils {
      * @param in Reader.
      * @return Expiry policy factory.
      */
-    private static Factory<? extends ExpiryPolicy> readExpiryPolicyFactory(BinaryRawReader in) {
+    public static Factory<? extends ExpiryPolicy> readExpiryPolicyFactory(BinaryRawReader in) {
         if (!in.readBoolean())
             return null;
 
@@ -299,7 +299,7 @@ public class PlatformConfigurationUtils {
      *
      * @param out Writer.
      */
-    private static void writeExpiryPolicyFactory(BinaryRawWriter out, Factory<? extends ExpiryPolicy> factory) {
+    public static void writeExpiryPolicyFactory(BinaryRawWriter out, Factory<? extends ExpiryPolicy> factory) {
         if (!(factory instanceof PlatformExpiryPolicyFactory)) {
             out.writeBoolean(false);
 

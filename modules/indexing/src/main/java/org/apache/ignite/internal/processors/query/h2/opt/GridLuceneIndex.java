@@ -237,11 +237,11 @@ public class GridLuceneIndex implements AutoCloseable {
      *
      * @param qry Query.
      * @param filters Filters over result.
+     * @param pageSize Size of batch
      * @return Query result.
      * @throws IgniteCheckedException If failed.
      */
-    public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> query(String qry,
-        IndexingQueryFilter filters) throws IgniteCheckedException {
+    public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> query(String qry, IndexingQueryFilter filters, int pageSize) throws IgniteCheckedException {
         IndexReader reader;
 
         try {
@@ -262,7 +262,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
         IndexSearcher searcher;
 
-        TopDocs docs;
+        Query query;
 
         try {
             searcher = new IndexSearcher(reader);
@@ -275,12 +275,10 @@ public class GridLuceneIndex implements AutoCloseable {
             // Filter expired items.
             Query filter = LongPoint.newRangeQuery(EXPIRATION_TIME_FIELD_NAME, U.currentTimeMillis(), Long.MAX_VALUE);
 
-            BooleanQuery query = new BooleanQuery.Builder()
+            query = new BooleanQuery.Builder()
                 .add(parser.parse(qry), BooleanClause.Occur.MUST)
                 .add(filter, BooleanClause.Occur.FILTER)
                 .build();
-
-            docs = searcher.search(query, Integer.MAX_VALUE);
         }
         catch (Exception e) {
             U.closeQuiet(reader);
@@ -293,7 +291,7 @@ public class GridLuceneIndex implements AutoCloseable {
         if (filters != null)
             fltr = filters.forCache(cacheName);
 
-        return new It<>(reader, searcher, docs.scoreDocs, fltr);
+        return new It<>(reader, searcher, query, fltr, pageSize);
     }
 
     /** {@inheritDoc} */
@@ -306,23 +304,31 @@ public class GridLuceneIndex implements AutoCloseable {
      * Key-value iterator over fulltext search result.
      */
     private class It<K, V> extends GridCloseableIteratorAdapter<IgniteBiTuple<K, V>> {
+        private final int BatchPosBeforeHead = -1;
+
         /** */
         private static final long serialVersionUID = 0L;
+
+        /** */
+        private final int pageSize;
 
         /** */
         private final IndexReader reader;
 
         /** */
-        private final IndexSearcher searcher;
+        private final Query query;
 
         /** */
-        private final ScoreDoc[] docs;
+        private final IndexSearcher searcher;
+
+        /** current batch docs*/
+        private ScoreDoc[] batch;
+
+        /** current position in batch*/
+        private int batchPos = BatchPosBeforeHead;
 
         /** */
         private final IndexingQueryCacheFilter filters;
-
-        /** */
-        private int idx;
 
         /** */
         private IgniteBiTuple<K, V> curr;
@@ -335,16 +341,16 @@ public class GridLuceneIndex implements AutoCloseable {
          *
          * @param reader Reader.
          * @param searcher Searcher.
-         * @param docs Docs.
          * @param filters Filters over result.
          * @throws IgniteCheckedException if failed.
          */
-        private It(IndexReader reader, IndexSearcher searcher, ScoreDoc[] docs, IndexingQueryCacheFilter filters)
+        private It(IndexReader reader, IndexSearcher searcher, Query query, IndexingQueryCacheFilter filters, int pageSize)
             throws IgniteCheckedException {
             this.reader = reader;
             this.searcher = searcher;
-            this.docs = docs;
             this.filters = filters;
+            this.query = query;
+            this.pageSize = pageSize;
 
             coctx = objectContext();
 
@@ -374,11 +380,27 @@ public class GridLuceneIndex implements AutoCloseable {
         private void findNext() throws IgniteCheckedException {
             curr = null;
 
-            while (idx < docs.length) {
+            if(isClosed())
+                throw new IgniteCheckedException("Iterator already closed");
+
+            if (shouldRequestNextBatch()) {
+                try {
+                    requestNextBatch();
+                } catch (IOException e) {
+                    close();
+                    throw new IgniteCheckedException(e);
+                }
+            }
+
+            if(batch == null)
+                return;
+
+            while (batchPos < batch.length) {
                 Document doc;
+                ScoreDoc scoreDoc =batch[batchPos++];
 
                 try {
-                    doc = searcher.doc(docs[idx++].doc);
+                    doc = searcher.doc(scoreDoc.doc);
                 }
                 catch (IOException e) {
                     throw new IgniteCheckedException(e);
@@ -406,6 +428,34 @@ public class GridLuceneIndex implements AutoCloseable {
             }
         }
 
+        private boolean shouldRequestNextBatch()  {
+            if(batch == null){
+                // should request for first batch
+                return (batchPos == BatchPosBeforeHead) ;
+            } else {
+                // should request when reached to the end of batch
+                return (batchPos  == batch.length);
+            }
+        }
+
+        private void requestNextBatch() throws IOException {
+            TopDocs docs;
+
+            if (batch == null) {
+                docs = searcher.search(query, pageSize);
+            } else {
+                docs = searcher.searchAfter(batch[batch.length - 1], query, pageSize);
+            }
+
+            if(docs.scoreDocs.length ==0) {
+                batch = null;
+            }else{
+                batch = docs.scoreDocs;
+            }
+
+            batchPos = 0;
+        }
+
         /** {@inheritDoc} */
         @Override protected IgniteBiTuple<K, V> onNext() throws IgniteCheckedException {
             IgniteBiTuple<K, V> res = curr;
@@ -424,5 +474,7 @@ public class GridLuceneIndex implements AutoCloseable {
         @Override protected void onClose() throws IgniteCheckedException {
             U.closeQuiet(reader);
         }
+
+
     }
 }

@@ -62,7 +62,8 @@ namespace Apache.Ignite.Core.Impl.Client
         QuerySqlCursorGetPage = 2003,
         QuerySqlFields = 2004,
         QuerySqlFieldsCursorGetPage = 2005,
-
+        QueryText = 2106,
+        QueryTextCursorGetPage=2107,
         // Metadata.
         BinaryTypeNameGet = 3000,
         BinaryTypeNamePut = 3001,

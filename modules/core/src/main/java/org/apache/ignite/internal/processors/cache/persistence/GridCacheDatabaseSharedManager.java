@@ -1356,8 +1356,19 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                     final int cacheId = cacheCtx.cacheId();
                     final GridFutureAdapter<Void> usrFut = idxRebuildFuts.get(cacheId);
 
+                    /**
+                    todo :[warning] this is hack for always rebuild Indexes from hash when cluster is inactive. Need to revert into original logic when Lucene indexes support persistent.
+                    This hack exist because lucene index now not support persistent. When node restarted Lucene indexes gone.
+                    Then we need to rebuild indexes
+                    original was only rebuild when cache has not been indexed yet
                     if (!cctx.pageStore().hasIndexStore(cacheCtx.groupId()) && cacheCtx.affinityNode()
                         && cacheCtx.group().persistenceEnabled()) {
+                    */
+
+                    //TAM: hack need to rebuildIndexes when indexes is missing or cluster is not active. this hack is for Lucene indexes
+                    boolean shouldRebuildIndexes = cacheCtx.group().persistenceEnabled();
+
+                    if (shouldRebuildIndexes) {
                         IgniteInternalFuture<?> rebuildFut = cctx.kernalContext().query()
                             .rebuildIndexesFromHash(Collections.singleton(cacheCtx.cacheId()));
 
@@ -1373,7 +1384,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
                                 if (ccfg != null) {
                                     log().info("Finished indexes rebuilding for cache [name=" + ccfg.getName()
-                                        + ", grpName=" + ccfg.getGroupName() + ']');
+                                            + ", grpName=" + ccfg.getGroupName() + ']');
                                 }
                             }
                         });

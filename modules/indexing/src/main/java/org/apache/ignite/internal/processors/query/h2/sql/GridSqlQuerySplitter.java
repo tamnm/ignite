@@ -1811,6 +1811,7 @@ public class GridSqlQuerySplitter {
         if (el instanceof GridSqlAlias ||
             el instanceof GridSqlOperation ||
             el instanceof GridSqlFunction ||
+            el instanceof GridJavaAggregateFunction ||
             el instanceof GridSqlArray) {
             for (int i = 0; i < el.size(); i++)
                 normalizeExpression(el, i);
@@ -1994,6 +1995,9 @@ public class GridSqlQuerySplitter {
         if (el instanceof GridSqlAggregateFunction)
             return true;
 
+        if(el instanceof  GridJavaAggregateFunction)
+            return true;
+
         // If in SELECT clause we have a subquery expression with aggregate,
         // we should not split it. Run the whole subquery on MAP stage.
         if (el instanceof GridSqlSubquery)
@@ -2054,12 +2058,54 @@ public class GridSqlQuerySplitter {
             return true;
         }
 
+        if (el instanceof GridJavaAggregateFunction) {
+            splitJavaAggregate(parentExpr, childIdx, mapSelect, exprIdx, first);
+
+            return true;
+        }
+
         for (int i = 0; i < el.size(); i++) {
             if (splitAggregates(el, i, mapSelect, exprIdx, hasDistinctAggregate, first))
                 first = false;
         }
 
         return !first;
+    }
+
+    private void splitJavaAggregate(
+            GridSqlAst parentExpr,
+            int aggIdx,
+            List<GridSqlAst> mapSelect,
+            int exprIdx,
+            boolean first
+    ){
+        GridJavaAggregateFunction agg = parentExpr.child(aggIdx);
+
+        GridSqlAlias mapAggAlias = alias(columnName(first ? exprIdx : mapSelect.size()), EMPTY);
+
+        if (first)
+            mapSelect.set(exprIdx, mapAggAlias);
+        else
+            mapSelect.add(mapAggAlias);
+
+        GridSqlElement mapAgg, rdcAgg;
+
+        mapAgg = aggregate(agg.getFunction()).resultType(agg.resultType());
+
+        for(int i = 0; i<agg.size(); i++)
+            mapAgg.addChild(agg.child(i));
+
+        rdcAgg = aggregate(agg.reducerFunction()).addChild(column(mapAggAlias.alias()));
+
+        assert !(mapAgg instanceof GridSqlAlias);
+        assert mapAgg.resultType() != null;
+
+        // Fill the map alias with aggregate.
+        mapAggAlias.child(0, mapAgg);
+        mapAggAlias.resultType(mapAgg.resultType());
+
+        // Replace in original expression aggregate with reduce aggregate.
+        parentExpr.child(aggIdx, rdcAgg);
     }
 
     /**
@@ -2216,6 +2262,10 @@ public class GridSqlQuerySplitter {
      */
     private static GridSqlAggregateFunction aggregate(boolean distinct, GridSqlFunctionType type) {
         return new GridSqlAggregateFunction(distinct, type);
+    }
+
+    private static GridJavaAggregateFunction aggregate(String javaFunction){
+        return new GridJavaAggregateFunction(javaFunction);
     }
 
     /**

@@ -145,6 +145,11 @@ namespace Apache.Ignite.Core.Tests.Client.Cache
             return _cache.Query(sqlFieldsQuery);
         }
 
+        public IQueryCursor<ICacheEntry<TK, TV>> Query(TextQuery textQuery)
+        {
+            return _cache.Query(textQuery);
+        }
+
         /** <inheritDoc /> */
         public CacheResult<TV> GetAndPut(TK key, TV val)
         {

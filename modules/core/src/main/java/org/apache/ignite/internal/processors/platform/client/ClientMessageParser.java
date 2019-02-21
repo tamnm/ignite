@@ -68,6 +68,7 @@ import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheRe
 import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheScanQueryRequest;
 import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheSqlFieldsQueryRequest;
 import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheSqlQueryRequest;
+import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheTextQueryRequest;
 
 /**
  * Thin client message parser.
@@ -189,6 +190,10 @@ public class ClientMessageParser implements ClientListenerMessageParser {
 
     /** */
     private static final short OP_QUERY_SQL_FIELDS_CURSOR_GET_PAGE = 2005;
+
+    private static final short OP_QUERY_TEXT = 2106;
+
+    private static final short OP_QUERY_TEXT_CURSOR_GET_PAGE = 2107;
 
     /* Binary metadata operations. */
     /** */
@@ -363,6 +368,12 @@ public class ClientMessageParser implements ClientListenerMessageParser {
                 return new ClientCacheSqlQueryRequest(reader);
 
             case OP_QUERY_SQL_CURSOR_GET_PAGE:
+                return new ClientCacheQueryNextPageRequest(reader);
+
+            case OP_QUERY_TEXT:
+                return new ClientCacheTextQueryRequest(reader);
+
+            case OP_QUERY_TEXT_CURSOR_GET_PAGE:
                 return new ClientCacheQueryNextPageRequest(reader);
 
             case OP_QUERY_SQL_FIELDS:

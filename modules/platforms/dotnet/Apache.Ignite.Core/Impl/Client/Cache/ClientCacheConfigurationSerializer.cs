@@ -23,6 +23,7 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
     using Apache.Ignite.Core.Client.Cache;
     using Apache.Ignite.Core.Impl.Binary;
     using Apache.Ignite.Core.Impl.Binary.IO;
+    using Apache.Ignite.Core.Impl.Cache.Expiry;
 
     /// <summary>
     /// Writes and reads <see cref="CacheConfiguration"/> for thin client mode.
@@ -75,7 +76,9 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
             MaxConcurrentAsyncOperations = 403,
             PartitionLossPolicy = 404,
             EagerTtl = 405, 
-            StatisticsEnabled = 406
+            StatisticsEnabled = 406,
+            ExpiryPolicyFactory =500,
+            KeepBinaryInStore=501,
         }
 
         /** Property count. */
@@ -120,6 +123,8 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
 
             to.KeyConfiguration = from.KeyConfiguration;
             to.QueryEntities = from.QueryEntities;
+            to.ExpiryPolicyFactory = from.ExpiryPolicyFactory;
+            to.KeepBinaryInStore = from.KeepBinaryInStore;
 
             if (!ignoreUnsupportedProperties)
             {
@@ -190,6 +195,8 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
 
             to.KeyConfiguration = from.KeyConfiguration;
             to.QueryEntities = from.QueryEntities;
+            to.ExpiryPolicyFactory = from.ExpiryPolicyFactory;
+            to.KeepBinaryInStore = from.KeepBinaryInStore;
         }
 
         /// <summary>
@@ -305,6 +312,12 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
             code(Op.QueryEntities);
             writer.WriteCollectionRaw(cfg.QueryEntities, srvVer);
 
+            code(Op.ExpiryPolicyFactory);
+            ExpiryPolicySerializer.WritePolicyFactory(writer, cfg.ExpiryPolicyFactory);
+
+            code(Op.KeepBinaryInStore);
+            writer.WriteBoolean(cfg.KeepBinaryInStore);
+
             // Write length (so that part of the config can be skipped).
             var len = writer.Stream.Position - pos - 4;
             writer.Stream.WriteInt(pos, len);
@@ -353,6 +366,8 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
             cfg.WriteSynchronizationMode = (CacheWriteSynchronizationMode)reader.ReadInt();
             cfg.KeyConfiguration = reader.ReadCollectionRaw(r => new CacheKeyConfiguration(r));
             cfg.QueryEntities = reader.ReadCollectionRaw(r => new QueryEntity(r, srvVer));
+            cfg.ExpiryPolicyFactory = ExpiryPolicySerializer.ReadPolicyFactory(reader);
+            cfg.KeepBinaryInStore = reader.ReadBoolean();
 
             Debug.Assert(len == reader.Stream.Position - pos);
         }

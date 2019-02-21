@@ -26,6 +26,8 @@ namespace Apache.Ignite.Core.Client.Cache
     using System.Linq;
     using Apache.Ignite.Core.Cache;
     using Apache.Ignite.Core.Cache.Configuration;
+    using Apache.Ignite.Core.Cache.Expiry;
+    using Apache.Ignite.Core.Common;
     using Apache.Ignite.Core.Configuration;
     using Apache.Ignite.Core.Impl;
     using Apache.Ignite.Core.Impl.Binary.IO;
@@ -310,6 +312,21 @@ namespace Apache.Ignite.Core.Client.Cache
         /// </summary>
         [SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]
         public ICollection<QueryEntity> QueryEntities { get; set; }
+
+        /// <summary>
+        /// Gets or sets the factory for <see cref="IExpiryPolicy"/> to be used for all cache operations,
+        /// unless <see cref="ICache{TK,TV}.WithExpiryPolicy"/> is called.
+        /// <para />
+        /// Default is null, which means no expiration.
+        /// </summary>
+        public IFactory<IExpiryPolicy> ExpiryPolicyFactory { get; set; }
+
+        /// <summary>
+        /// Gets or sets the flag indicating whether CacheStore is working with binary objects 
+        /// instead of deserialized objects.
+        /// </summary>
+        [DefaultValue(CacheConfiguration.DefaultKeepBinaryInStore)]
+        public bool KeepBinaryInStore { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether statistics gathering is enabled on a cache.

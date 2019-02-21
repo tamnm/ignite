@@ -77,13 +77,7 @@ import org.apache.ignite.internal.processors.cache.mvcc.MvccSnapshot;
 import org.apache.ignite.internal.processors.cache.mvcc.MvccUtils;
 import org.apache.ignite.internal.processors.cache.persistence.CacheDataRow;
 import org.apache.ignite.internal.processors.cache.persistence.tree.io.PageIO;
-import org.apache.ignite.internal.processors.cache.query.CacheQueryPartitionInfo;
-import org.apache.ignite.internal.processors.cache.query.GridCacheQueryManager;
-import org.apache.ignite.internal.processors.cache.query.GridCacheQueryMarshallable;
-import org.apache.ignite.internal.processors.cache.query.GridCacheTwoStepQuery;
-import org.apache.ignite.internal.processors.cache.query.IgniteQueryErrorCode;
-import org.apache.ignite.internal.processors.cache.query.QueryTable;
-import org.apache.ignite.internal.processors.cache.query.SqlFieldsQueryEx;
+import org.apache.ignite.internal.processors.cache.query.*;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteTxAdapter;
 import org.apache.ignite.internal.processors.odbc.SqlStateCode;
 import org.apache.ignite.internal.processors.query.CacheQueryObjectValueContext;
@@ -180,6 +174,7 @@ import org.apache.ignite.plugin.extensions.communication.Message;
 import org.apache.ignite.resources.LoggerResource;
 import org.apache.ignite.spi.indexing.IndexingQueryFilter;
 import org.apache.ignite.spi.indexing.IndexingQueryFilterImpl;
+import org.h2.api.AggregateFunction;
 import org.h2.api.ErrorCode;
 import org.h2.api.JavaObjectSerializer;
 import org.h2.command.Prepared;
@@ -1017,7 +1012,7 @@ public class IgniteH2Indexing implements GridQueryIndexing {
     /** {@inheritDoc} */
     @SuppressWarnings("unchecked")
     @Override public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> queryLocalText(String schemaName,
-        String cacheName, String qry, String typeName, IndexingQueryFilter filters) throws IgniteCheckedException {
+        String cacheName, String qry, String typeName, IndexingQueryFilter filters, int pageSize) throws IgniteCheckedException {
         H2TableDescriptor tbl = tableDescriptor(schemaName, cacheName, typeName);
 
         if (tbl != null && tbl.luceneIndex() != null) {
@@ -1027,7 +1022,7 @@ public class IgniteH2Indexing implements GridQueryIndexing {
             try {
                 runs.put(run.id(), run);
 
-                return tbl.luceneIndex().query(qry.toUpperCase(), filters);
+                return tbl.luceneIndex().query(qry.toUpperCase(), filters, pageSize);
             }
             finally {
                 runs.remove(run.id());
@@ -3431,23 +3426,35 @@ public class IgniteH2Indexing implements GridQueryIndexing {
             return;
 
         for (Class<?> cls : clss) {
-            for (Method m : cls.getDeclaredMethods()) {
-                QuerySqlFunction ann = m.getAnnotation(QuerySqlFunction.class);
+            if(AggregateFunction.class.isAssignableFrom(cls)){
+                int modifiers = cls.getModifiers();
 
-                if (ann != null) {
-                    int modifiers = m.getModifiers();
+                if (!Modifier.isPublic(modifiers))
+                    throw new IgniteCheckedException("Class " + cls.getName() + " must be public.");
 
-                    if (!Modifier.isStatic(modifiers) || !Modifier.isPublic(modifiers))
-                        throw new IgniteCheckedException("Method " + m.getName() + " must be public static.");
+                String alias = cls.getSimpleName();
+                String clause = "CREATE AGGREGATE IF NOT EXISTS " + alias + " FOR \"" + cls.getName() + '"';
 
-                    String alias = ann.alias().isEmpty() ? m.getName() : ann.alias();
+                executeStatement(schema, clause);
+            }else{
+                for (Method m : cls.getDeclaredMethods()) {
+                    QuerySqlFunction ann = m.getAnnotation(QuerySqlFunction.class);
 
-                    String clause = "CREATE ALIAS IF NOT EXISTS " + alias + (ann.deterministic() ?
-                        " DETERMINISTIC FOR \"" :
-                        " FOR \"") +
-                        cls.getName() + '.' + m.getName() + '"';
+                    if (ann != null) {
+                        int modifiers = m.getModifiers();
 
-                    executeStatement(schema, clause);
+                        if (!Modifier.isStatic(modifiers) || !Modifier.isPublic(modifiers))
+                            throw new IgniteCheckedException("Method " + m.getName() + " must be public static.");
+
+                        String alias = ann.alias().isEmpty() ? m.getName() : ann.alias();
+
+                        String clause = "CREATE ALIAS IF NOT EXISTS " + alias + (ann.deterministic() ?
+                                " DETERMINISTIC FOR \"" :
+                                " FOR \"") +
+                                cls.getName() + '.' + m.getName() + '"';
+
+                        executeStatement(schema, clause);
+                    }
                 }
             }
         }

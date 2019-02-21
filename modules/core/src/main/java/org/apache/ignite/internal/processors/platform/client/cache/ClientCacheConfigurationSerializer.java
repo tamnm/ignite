@@ -31,6 +31,12 @@ import org.apache.ignite.internal.binary.BinaryRawWriterEx;
 import java.util.ArrayList;
 import java.util.Collection;
 import org.apache.ignite.internal.processors.odbc.ClientListenerProtocolVersion;
+import org.apache.ignite.internal.processors.platform.cache.expiry.PlatformExpiryPolicyFactory;
+import org.apache.ignite.internal.processors.platform.utils.PlatformConfigurationUtils;
+import org.apache.ignite.internal.processors.platform.utils.PlatformUtils;
+
+import javax.cache.configuration.Factory;
+import javax.cache.expiry.ExpiryPolicy;
 
 import static org.apache.ignite.internal.processors.platform.utils.PlatformConfigurationUtils.readQueryEntity;
 import static org.apache.ignite.internal.processors.platform.utils.PlatformConfigurationUtils.writeEnumInt;
@@ -130,6 +136,11 @@ public class ClientCacheConfigurationSerializer {
     /** */
     private static final short STATISTICS_ENABLED = 406;
 
+    /** */
+    private static final short EXPIRY_POLICY_FACTORY = 500;
+
+    private static final short KEEP_IN_BINARY_STORE = 501;
+
 
     /**
      * Writes the cache configuration.
@@ -196,6 +207,10 @@ public class ClientCacheConfigurationSerializer {
                 writeQueryEntity(writer, e, ver);
         } else
             writer.writeInt(0);
+
+        PlatformConfigurationUtils.writeExpiryPolicyFactory(writer, cfg.getExpiryPolicyFactory());
+
+        writer.writeBoolean(cfg.isStoreKeepBinary());
 
         // Write length (so that part of the config can be skipped).
         writer.writeInt(pos, writer.out().position() - pos - 4);
@@ -357,6 +372,14 @@ public class ClientCacheConfigurationSerializer {
                         cfg.setQueryEntities(entities);
                     }
                     break;
+
+                case EXPIRY_POLICY_FACTORY:
+                    Factory<? extends ExpiryPolicy> factory = PlatformConfigurationUtils.readExpiryPolicyFactory(reader);
+
+                    cfg.setExpiryPolicyFactory(factory);
+
+                case KEEP_IN_BINARY_STORE:
+                    cfg.setStoreKeepBinary(reader.readBoolean());
             }
         }
 
