@@ -45,6 +45,8 @@ public enum GridSqlFunctionType {
     /** */
     GROUP_CONCAT,
 
+    /** */
+    ARRAY_AGG,
     // Functions with special handling.
     /** */
     CASE,
@@ -65,6 +67,8 @@ public enum GridSqlFunctionType {
     TABLE,
 
     /** Constant for all other functions. */
+    JAVA_FUNCTION,
+
     UNKNOWN_FUNCTION;
 
     /** */

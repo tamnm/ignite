@@ -41,6 +41,9 @@ public class SplitterUtils {
         if (el instanceof GridSqlAggregateFunction)
             return true;
 
+        if(el instanceof  GridJavaAggregateFunction)
+            return true;
+
         // If in SELECT clause we have a subquery expression with aggregate,
         // we should not split it. Run the whole subquery on MAP stage.
         if (el instanceof GridSqlSubquery)
@@ -205,6 +208,10 @@ public class SplitterUtils {
      */
     public static GridSqlAggregateFunction aggregate(boolean distinct, GridSqlFunctionType type) {
         return new GridSqlAggregateFunction(distinct, type);
+    }
+
+    public static GridJavaAggregateFunction aggregate(String javaFunction){
+        return new GridJavaAggregateFunction(javaFunction);
     }
 
     /**

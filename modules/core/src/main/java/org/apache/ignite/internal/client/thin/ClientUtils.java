@@ -56,6 +56,8 @@ import org.apache.ignite.internal.binary.BinaryWriterExImpl;
 import org.apache.ignite.internal.binary.streams.BinaryInputStream;
 import org.apache.ignite.internal.binary.streams.BinaryOutputStream;
 import org.apache.ignite.internal.processors.odbc.ClientListenerProtocolVersion;
+import org.apache.ignite.internal.processors.platform.client.cache.ClientCacheConfigurationSerializer;
+import org.apache.ignite.internal.processors.platform.utils.PlatformConfigurationUtils;
 
 import static org.apache.ignite.internal.processors.platform.client.ClientConnectionContext.VER_1_2_0;
 
@@ -343,6 +345,9 @@ final class ClientUtils {
                 )
             );
 
+            itemWriter.accept(CfgItem.EXPIRY_POLICY_FACTORY, w -> PlatformConfigurationUtils.writeExpiryPolicyFactory(w, cfg.getExpiryPolicyFactory()));
+            itemWriter.accept(CfgItem.KEEP_BINARY_IN_STORE, w-> w.writeBoolean(cfg.isStoreKeepBinary()));
+
             writer.writeInt(origPos, out.position() - origPos - 4); // configuration length
             writer.writeInt(origPos + 4, propCnt.get()); // properties count
         }
@@ -468,7 +473,9 @@ final class ClientUtils {
                                 }
                             ));
                     }
-                ).toArray(new QueryEntity[0]));
+                ).toArray(new QueryEntity[0]))
+                .setExpiryPolicyFactory(PlatformConfigurationUtils.readExpiryPolicyFactory(reader))
+                .setStoreKeepBinary(reader.readBoolean());
         }
     }
 
@@ -639,7 +646,9 @@ final class ClientUtils {
         /** Sql index max inline size. */SQL_IDX_MAX_INLINE_SIZE(204),
         /** Sql schema. */SQL_SCHEMA(203),
         /** Key configs. */KEY_CONFIGS(401),
-        /** Key entities. */QUERY_ENTITIES(200);
+        /** Key entities. */QUERY_ENTITIES(200),
+        /** Expiry policy factory*/ EXPIRY_POLICY_FACTORY(500),
+        /** Expiry policy factory*/ KEEP_BINARY_IN_STORE(501);
 
         /** Code. */
         private final short code;

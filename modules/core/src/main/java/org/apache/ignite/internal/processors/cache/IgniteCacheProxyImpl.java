@@ -538,6 +538,9 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
 
             qry = ctx.queries().createFullTextQuery(p.getType(), p.getText(), isKeepBinary);
 
+            if (filter.getPageSize() > 0)
+                qry.pageSize(filter.getPageSize());
+
             if (grp != null)
                 qry.projection(grp);
 

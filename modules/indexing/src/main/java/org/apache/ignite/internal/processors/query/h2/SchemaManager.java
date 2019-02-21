@@ -61,6 +61,7 @@ import org.apache.ignite.internal.processors.query.h2.sys.view.SqlSystemViewTabl
 import org.apache.ignite.internal.processors.query.schema.SchemaIndexCacheVisitor;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.h2.api.AggregateFunction;
 import org.h2.index.Index;
 import org.jetbrains.annotations.Nullable;
 
@@ -375,24 +376,40 @@ public class SchemaManager {
         if (F.isEmpty(clss))
             return;
 
+
         for (Class<?> cls : clss) {
-            for (Method m : cls.getDeclaredMethods()) {
-                QuerySqlFunction ann = m.getAnnotation(QuerySqlFunction.class);
 
-                if (ann != null) {
-                    int modifiers = m.getModifiers();
+            if (AggregateFunction.class.isAssignableFrom(cls)) {
+                int modifiers = cls.getModifiers();
 
-                    if (!Modifier.isStatic(modifiers) || !Modifier.isPublic(modifiers))
-                        throw new IgniteCheckedException("Method " + m.getName() + " must be public static.");
+                if (!Modifier.isPublic(modifiers))
+                    throw new IgniteCheckedException("Class " + cls.getName() + " must be public.");
 
-                    String alias = ann.alias().isEmpty() ? m.getName() : ann.alias();
+                String alias = cls.getSimpleName();
+                String clause = "CREATE AGGREGATE IF NOT EXISTS " + alias + " FOR \"" + cls.getName() + '"';
 
-                    String clause = "CREATE ALIAS IF NOT EXISTS " + alias + (ann.deterministic() ?
-                        " DETERMINISTIC FOR \"" :
-                        " FOR \"") +
-                        cls.getName() + '.' + m.getName() + '"';
+                connMgr.executeStatement(schema, clause);
 
-                    connMgr.executeStatement(schema, clause);
+            } else {
+                for (Method m : cls.getDeclaredMethods()) {
+
+                    QuerySqlFunction ann = m.getAnnotation(QuerySqlFunction.class);
+
+                    if (ann != null) {
+                        int modifiers = m.getModifiers();
+
+                        if (!Modifier.isStatic(modifiers) || !Modifier.isPublic(modifiers))
+                            throw new IgniteCheckedException("Method " + m.getName() + " must be public static.");
+
+                        String alias = ann.alias().isEmpty() ? m.getName() : ann.alias();
+
+                        String clause = "CREATE ALIAS IF NOT EXISTS " + alias + (ann.deterministic() ?
+                                " DETERMINISTIC FOR \"" :
+                                " FOR \"") +
+                                cls.getName() + '.' + m.getName() + '"';
+
+                        connMgr.executeStatement(schema, clause);
+                    }
                 }
             }
         }

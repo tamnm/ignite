@@ -1450,6 +1450,7 @@ public class GridSqlQuerySplitter {
         if (el instanceof GridSqlAlias ||
             el instanceof GridSqlOperation ||
             el instanceof GridSqlFunction ||
+            el instanceof GridJavaAggregateFunction ||
             el instanceof GridSqlArray) {
             for (int i = 0; i < el.size(); i++)
                 normalizeExpression(el, i);
@@ -1567,12 +1568,54 @@ public class GridSqlQuerySplitter {
             return true;
         }
 
+        if (el instanceof GridJavaAggregateFunction) {
+            splitJavaAggregate(parentExpr, childIdx, mapSelect, exprIdx, first);
+
+            return true;
+        }
+
         for (int i = 0; i < el.size(); i++) {
             if (splitAggregates(el, i, mapSelect, exprIdx, hasDistinctAggregate, first))
                 first = false;
         }
 
         return !first;
+    }
+
+    private void splitJavaAggregate(
+            GridSqlAst parentExpr,
+            int aggIdx,
+            List<GridSqlAst> mapSelect,
+            int exprIdx,
+            boolean first
+    ){
+        GridJavaAggregateFunction agg = parentExpr.child(aggIdx);
+
+        GridSqlAlias mapAggAlias = SplitterUtils.alias(columnName(first ? exprIdx : mapSelect.size()), EMPTY);
+
+        if (first)
+            mapSelect.set(exprIdx, mapAggAlias);
+        else
+            mapSelect.add(mapAggAlias);
+
+        GridSqlElement mapAgg, rdcAgg;
+
+        mapAgg = SplitterUtils.aggregate(agg.getFunction()).resultType(agg.resultType());
+
+        for(int i = 0; i<agg.size(); i++)
+            mapAgg.addChild(agg.child(i));
+
+        rdcAgg = SplitterUtils.aggregate(agg.reducerFunction()).addChild(SplitterUtils.column(mapAggAlias.alias()));
+
+        assert !(mapAgg instanceof GridSqlAlias);
+        assert mapAgg.resultType() != null;
+
+        // Fill the map alias with aggregate.
+        mapAggAlias.child(0, mapAgg);
+        mapAggAlias.resultType(mapAgg.resultType());
+
+        // Replace in original expression aggregate with reduce aggregate.
+        parentExpr.child(aggIdx, rdcAgg);
     }
 
     /**

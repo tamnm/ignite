@@ -18,24 +18,41 @@
 package org.apache.ignite.internal.processors.query.h2.opt;
 
 import java.io.IOException;
-import java.util.Collection;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.*;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.cache.QueryEntity;
+import org.apache.ignite.cache.query.annotations.QuerySqlFunction;
+import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.processors.cache.CacheObject;
 import org.apache.ignite.internal.processors.cache.CacheObjectContext;
+import org.apache.ignite.internal.processors.cache.persistence.filename.PdsFolderSettings;
 import org.apache.ignite.internal.processors.cache.version.GridCacheVersion;
 import org.apache.ignite.internal.processors.query.GridQueryIndexDescriptor;
 import org.apache.ignite.internal.processors.query.GridQueryTypeDescriptor;
 import org.apache.ignite.internal.util.GridAtomicLong;
 import org.apache.ignite.internal.util.GridCloseableIteratorAdapter;
+import org.apache.ignite.internal.util.GridEmptyCloseableIterator;
+import org.apache.ignite.internal.util.GridEmptyIterator;
 import org.apache.ignite.internal.util.lang.GridCloseableIterator;
 import org.apache.ignite.internal.util.offheap.unsafe.GridUnsafeMemory;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.spi.indexing.IndexingQueryFilter;
 import org.apache.ignite.spi.indexing.IndexingQueryCacheFilter;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
+import org.apache.lucene.analysis.miscellaneous.LengthFilter;
+import org.apache.lucene.analysis.ngram.NGramTokenFilter;
+import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.LongPoint;
@@ -43,28 +60,27 @@ import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
 import org.apache.lucene.util.BytesRef;
+import org.h2.engine.Session;
+import org.h2.jdbc.JdbcConnection;
+import org.h2.table.Column;
 import org.h2.util.JdbcUtils;
 import org.jetbrains.annotations.Nullable;
 
 import static org.apache.ignite.internal.processors.query.QueryUtils.KEY_FIELD_NAME;
-import static org.apache.ignite.internal.processors.query.QueryUtils.VAL_FIELD_NAME;
 
 /**
  * Lucene fulltext index.
  */
 public class GridLuceneIndex implements AutoCloseable {
+    private static ConcurrentMap<String, GridLuceneIndex> luceneIndexes = new ConcurrentHashMap<>();
+
     /** Field name for string representation of value. */
     public static final String VAL_STR_FIELD_NAME = "_gg_val_str__";
 
@@ -83,6 +99,14 @@ public class GridLuceneIndex implements AutoCloseable {
     /** */
     private final IndexWriter writer;
 
+    private final String[] keyFields;
+
+    private DirectoryReader reader;
+
+    private IndexSearcher searcher;
+
+    private Analyzer queryAnalyzer;
+
     /** */
     private final String[] idxdFields;
 
@@ -90,7 +114,7 @@ public class GridLuceneIndex implements AutoCloseable {
     private final AtomicLong updateCntr = new GridAtomicLong();
 
     /** */
-    private final GridLuceneDirectory dir;
+    private final BaseDirectory dir;
 
     /** */
     private final GridKernalContext ctx;
@@ -109,10 +133,65 @@ public class GridLuceneIndex implements AutoCloseable {
         this.cacheName = cacheName;
         this.type = type;
 
-        dir = new GridLuceneDirectory(new GridUnsafeMemory(0));
+        boolean isPersist = ctx.cache().internalCache(cacheName).context().group().persistenceEnabled();
+        CacheConfiguration<?,?>  cacheConfig = ctx.cache().internalCache(cacheName).configuration();
+
+        List<String> keyFields = new ArrayList<>();
+
+        for(QueryEntity qe : cacheConfig.getQueryEntities()) {
+            Set<String> qeKeyFields = qe.getKeyFields();
+            if(qeKeyFields != null)
+            for(String k : qeKeyFields){
+                keyFields.add(k.toUpperCase());
+            }
+        }
+
+        this.keyFields = keyFields.toArray(new String[0]);
 
         try {
-            writer = new IndexWriter(dir, new IndexWriterConfig(new StandardAnalyzer()));
+
+            final PdsFolderSettings folderSettings = ctx.pdsFolderResolver().resolveFolders();
+
+            Path path =Paths.get(folderSettings.persistentStoreRootPath().getPath(), folderSettings.folderName(), "LuceneIndex-"+cacheName);
+
+            dir =
+                    isPersist
+                            ? FSDirectory.open(path)
+                            : new GridLuceneDirectory(new GridUnsafeMemory(0));
+
+            IndexWriterConfig writerConfig = new IndexWriterConfig(new Analyzer() {
+
+                @Override
+                protected TokenStreamComponents createComponents(String fieldName) {
+                    Tokenizer tokenizer = new StandardTokenizer();
+
+                    TokenStream stream = tokenizer;
+                    stream = new NGramTokenFilter(stream,2,20,false);
+                    stream = new ASCIIFoldingFilter(stream);
+                    stream = new LowerCaseFilter(stream);
+                    return new TokenStreamComponents(tokenizer, stream);
+                }
+            });
+
+            queryAnalyzer =  new Analyzer() {
+                @Override
+                protected TokenStreamComponents createComponents(String s) {
+                    Tokenizer tokenizer = new StandardTokenizer();
+
+                    TokenStream stream = tokenizer;
+                    stream = new ASCIIFoldingFilter(stream);
+                    stream = new LowerCaseFilter(stream);
+                    stream = new LengthFilter(stream, 2,20);
+                    return new TokenStreamComponents(tokenizer, stream);
+                }
+            };
+
+            writer = new IndexWriter(dir, writerConfig);
+
+            if(DirectoryReader.indexExists(dir)) {
+                reader = DirectoryReader.open(dir);
+                searcher = new IndexSearcher(reader);
+            }
         }
         catch (IOException e) {
             throw new IgniteCheckedException(e);
@@ -134,6 +213,8 @@ public class GridLuceneIndex implements AutoCloseable {
         }
 
         idxdFields[idxdFields.length - 1] = VAL_STR_FIELD_NAME;
+
+        luceneIndexes.put(cacheName, this);
     }
 
     /**
@@ -189,14 +270,13 @@ public class GridLuceneIndex implements AutoCloseable {
 
             if (!stringsFound) {
                 writer.deleteDocuments(term);
-
                 return; // We did not find any strings to be indexed, will not store data at all.
             }
 
             doc.add(new StringField(KEY_FIELD_NAME, keyByteRef, Field.Store.YES));
 
-            if (type.valueClass() != String.class)
-                doc.add(new StoredField(VAL_FIELD_NAME, v.valueBytes(coctx)));
+//            if (type.valueClass() != String.class)
+//                doc.add(new StoredField(VAL_FIELD_NAME, v.valueBytes(coctx)));
 
             doc.add(new StoredField(VER_FIELD_NAME, ver.toString().getBytes()));
 
@@ -240,10 +320,47 @@ public class GridLuceneIndex implements AutoCloseable {
      * @return Query result.
      * @throws IgniteCheckedException If failed.
      */
-    public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> query(String qry,
-        IndexingQueryFilter filters) throws IgniteCheckedException {
-        IndexReader reader;
+    public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> query(String qry, IndexingQueryFilter filters) throws IgniteCheckedException {
+        if (!prepareQuery()) return new GridEmptyCloseableIterator<>();
 
+        Query query = parseQuery(qry);
+
+        IndexingQueryCacheFilter fltr = null;
+
+        if (filters != null)
+            fltr = filters.forCache(cacheName);
+
+        IgniteCache<K,V> rawCache =  ctx.grid().cache(cacheName).withKeepBinary();
+        //Tamnm: Hardcoded page size, limit for prevent performance issue from full text search
+        return new It<>(searcher, query, fltr, rawCache::get, 20, 0, 20);
+    }
+
+    protected Query parseQuery(String qry) throws IgniteCheckedException {
+        Query query;
+
+        try {
+
+            MultiFieldQueryParser parser = new MultiFieldQueryParser(idxdFields, queryAnalyzer);
+
+//            parser.setAllowLeadingWildcard(true);
+
+            // Filter expired items.
+            Query filter = LongPoint.newRangeQuery(EXPIRATION_TIME_FIELD_NAME, U.currentTimeMillis(), Long.MAX_VALUE);
+
+            query = new BooleanQuery.Builder()
+                .add(parser.parse(qry), BooleanClause.Occur.MUST)
+                .add(filter, BooleanClause.Occur.FILTER)
+                .build();
+        }
+        catch (Exception e) {
+            //U.closeQuiet(reader);
+
+            throw new IgniteCheckedException(e);
+        }
+        return query;
+    }
+
+    protected boolean prepareQuery() throws IgniteCheckedException {
         try {
             long updates = updateCntr.get();
 
@@ -254,75 +371,68 @@ public class GridLuceneIndex implements AutoCloseable {
             }
 
             //We can cache reader\searcher and change this to 'openIfChanged'
-            reader = DirectoryReader.open(writer);
+            if(reader == null) {
+                if(DirectoryReader.indexExists(dir)){
+                    reader = DirectoryReader.open(writer);
+                    searcher = new IndexSearcher(reader);
+                }
+                else
+                    return false;
+            }else {
+                DirectoryReader newReader = DirectoryReader.openIfChanged(reader);
+
+                if(newReader != null){
+                    reader= newReader;
+                    searcher = new IndexSearcher(reader);
+                }
+            }
         }
         catch (IOException e) {
             throw new IgniteCheckedException(e);
         }
-
-        IndexSearcher searcher;
-
-        TopDocs docs;
-
-        try {
-            searcher = new IndexSearcher(reader);
-
-            MultiFieldQueryParser parser = new MultiFieldQueryParser(idxdFields,
-                writer.getAnalyzer());
-
-//            parser.setAllowLeadingWildcard(true);
-
-            // Filter expired items.
-            Query filter = LongPoint.newRangeQuery(EXPIRATION_TIME_FIELD_NAME, U.currentTimeMillis(), Long.MAX_VALUE);
-
-            BooleanQuery query = new BooleanQuery.Builder()
-                .add(parser.parse(qry), BooleanClause.Occur.MUST)
-                .add(filter, BooleanClause.Occur.FILTER)
-                .build();
-
-            docs = searcher.search(query, Integer.MAX_VALUE);
-        }
-        catch (Exception e) {
-            U.closeQuiet(reader);
-
-            throw new IgniteCheckedException(e);
-        }
-
-        IndexingQueryCacheFilter fltr = null;
-
-        if (filters != null)
-            fltr = filters.forCache(cacheName);
-
-        return new It<>(reader, searcher, docs.scoreDocs, fltr);
+        return true;
     }
 
     /** {@inheritDoc} */
     @Override public void close() {
         U.closeQuiet(writer);
         U.close(dir, ctx.log(GridLuceneIndex.class));
+        luceneIndexes.remove(cacheName);
+    }
+
+    protected interface ItValueGetter<K,V>{
+        V getValue(K key);
     }
 
     /**
      * Key-value iterator over fulltext search result.
      */
     private class It<K, V> extends GridCloseableIteratorAdapter<IgniteBiTuple<K, V>> {
+        private final int BatchPosBeforeHead = -1;
+
         /** */
         private static final long serialVersionUID = 0L;
 
+        private final ItValueGetter<K, V> valueGetter;
         /** */
-        private final IndexReader reader;
+        private final int pageSize;
+
+        private int remains;
+
+        /** */
+        private final Query query;
 
         /** */
         private final IndexSearcher searcher;
 
-        /** */
-        private final ScoreDoc[] docs;
+        /** current batch docs*/
+        private ScoreDoc[] batch;
+
+        /** current position in batch*/
+        private int batchPos = BatchPosBeforeHead;
 
         /** */
         private final IndexingQueryCacheFilter filters;
-
-        /** */
-        private int idx;
 
         /** */
         private IgniteBiTuple<K, V> curr;
@@ -333,22 +443,21 @@ public class GridLuceneIndex implements AutoCloseable {
         /**
          * Constructor.
          *
-         * @param reader Reader.
          * @param searcher Searcher.
-         * @param docs Docs.
          * @param filters Filters over result.
          * @throws IgniteCheckedException if failed.
          */
-        private It(IndexReader reader, IndexSearcher searcher, ScoreDoc[] docs, IndexingQueryCacheFilter filters)
+        private It(IndexSearcher searcher, Query query, IndexingQueryCacheFilter filters,ItValueGetter<K,V> valueGetter ,int pageSize, int offset, int limit)
             throws IgniteCheckedException {
-            this.reader = reader;
             this.searcher = searcher;
-            this.docs = docs;
             this.filters = filters;
-
+            this.query = query;
+            this.valueGetter = valueGetter;
+            this.pageSize = pageSize;
+            this.remains = limit;
             coctx = objectContext();
-
             findNext();
+            skip(offset);
         }
 
         /**
@@ -374,11 +483,27 @@ public class GridLuceneIndex implements AutoCloseable {
         private void findNext() throws IgniteCheckedException {
             curr = null;
 
-            while (idx < docs.length) {
+            if(isClosed())
+                throw new IgniteCheckedException("Iterator already closed");
+
+            if (shouldRequestNextBatch()) {
+                try {
+                    requestNextBatch();
+                } catch (IOException e) {
+                    close();
+                    throw new IgniteCheckedException(e);
+                }
+            }
+
+            if(batch == null)
+                return;
+
+            while (batchPos < batch.length) {
                 Document doc;
+                ScoreDoc scoreDoc =batch[batchPos++];
 
                 try {
-                    doc = searcher.doc(docs[idx++].doc);
+                    doc = searcher.doc(scoreDoc.doc);
                 }
                 catch (IOException e) {
                     throw new IgniteCheckedException(e);
@@ -394,15 +519,64 @@ public class GridLuceneIndex implements AutoCloseable {
                 if (filters != null && !filters.apply(k))
                     continue;
 
-                V v = type.valueClass() == String.class ?
-                    (V)doc.get(VAL_STR_FIELD_NAME) :
-                    this.<V>unmarshall(doc.getBinaryValue(VAL_FIELD_NAME).bytes, ldr);
+//                V v = type.valueClass() == String.class ?
+//                    (V)doc.get(VAL_STR_FIELD_NAME) :
+//                    this.<V>unmarshall(doc.getBinaryValue(VAL_FIELD_NAME).bytes, ldr);
+
+                V v = valueGetter.getValue(k);
 
                 assert v != null;
 
                 curr = new IgniteBiTuple<>(k, v);
 
                 break;
+            }
+        }
+
+        private boolean shouldRequestNextBatch()  {
+            if(remains <= 0) return false;
+
+            if(batch == null){
+                // should request for first batch
+                return (batchPos == BatchPosBeforeHead) ;
+            } else {
+                // should request when reached to the end of batch
+                return (batchPos  == batch.length);
+            }
+        }
+
+        private void requestNextBatch() throws IOException {
+            TopDocs docs;
+            int remains0 = Math.min(pageSize, this.remains);
+
+            if (batch == null) {
+                docs = searcher.search(query, remains0);
+            } else {
+                if(remains0 > 0){
+                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0);
+                }
+                else {
+                    docs = null;
+                }
+            }
+
+            if(docs == null || docs.scoreDocs.length ==0) {
+                batch = null;
+            }else {
+                batch = docs.scoreDocs;
+                if (batch.length >= remains0)
+                    this.remains -= batch.length;
+                else
+                    this.remains = 0;
+            }
+
+            batchPos = 0;
+        }
+
+        private void skip(int count){
+            while(hasNext() && count>0){
+                next();
+                count --;
             }
         }
 
@@ -422,7 +596,70 @@ public class GridLuceneIndex implements AutoCloseable {
 
         /** {@inheritDoc} */
         @Override protected void onClose() throws IgniteCheckedException {
-            U.closeQuiet(reader);
+            //U.closeQuiet(reader);
         }
     }
+
+    public static class Functions {
+
+        public static final String SCORE_FIELD_NAME = "_SCORE";
+
+
+        @QuerySqlFunction(alias = "FT_SEARCH")
+        public static ResultSet search(Connection conn, String table, String qry, int offset, int limit) throws SQLException
+        {
+            GridLuceneIndex c = luceneIndexes.getOrDefault(table, null);
+            if(c == null)
+                throw new SQLException("Table was not found: "+ table);
+
+            qry  = qry.toUpperCase();
+
+            Session session = (Session) ((JdbcConnection)conn).getSession();
+
+            GridH2Table table1 = (GridH2Table) session.getDatabase().getSchema(session.getCurrentSchemaName()).findTableOrView(session, c.cacheName.toUpperCase());
+
+            List<Column> columns = new ArrayList<>();
+
+            for(String colName: c.keyFields){
+                if(!table1.doesColumnExist(colName)) continue;
+
+                Column col0 = table1.getColumn(colName);
+                assert  col0 != null;
+
+                columns.add(col0);
+            }
+
+            for(String colName : c.idxdFields){
+                if(!table1.doesColumnExist(colName)) continue;
+
+                Column col0 = table1.getColumn(colName);
+                assert  col0 != null;
+
+                if(columns.contains(col0)) continue;
+                columns.add(col0);
+            }
+
+            columns.add(new Column(SCORE_FIELD_NAME, Types.FLOAT));
+
+            Iterator<Object[]> iterator = new GridEmptyIterator<>();
+
+            try {
+                if (c.prepareQuery()){
+                    Query query = c.parseQuery(qry);
+                    ClassLoader ldr = null;
+                    GridKernalContext ctx = c.ctx;
+
+                    if (ctx != null && ctx.deploy().enabled())
+                        ldr = ctx.cache().internalCache(c.cacheName).context().deploy().globalLoader();
+
+                    iterator = new LuceneResultSet.It(c.searcher, query, c.objectContext(), ldr, columns.toArray(new Column[0]),20, offset, limit );
+                }
+            } catch (IgniteCheckedException e) {
+                throw new SQLException(e);
+            }
+
+            return new LuceneResultSet(iterator,  columns.toArray(new Column[0]));
+        }
+    }
+
 }

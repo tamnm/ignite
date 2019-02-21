@@ -217,6 +217,17 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
                     _ignite, s.ReadLong(), _keepBinary, s, ClientOp.QuerySqlCursorGetPage));
         }
 
+        public Task<IQueryCursor<ICacheEntry<TK, TV>>> QueryAsync(SqlQuery sqlQuery)
+        {
+            IgniteArgumentCheck.NotNull(sqlQuery, "sqlQuery");
+            IgniteArgumentCheck.NotNull(sqlQuery.Sql, "sqlQuery.Sql");
+            IgniteArgumentCheck.NotNull(sqlQuery.QueryType, "sqlQuery.QueryType");
+
+            return DoOutInOpAsync(ClientOp.QuerySql, w => WriteSqlQuery(w, sqlQuery),
+                s => (IQueryCursor<ICacheEntry<TK, TV>>) new ClientQueryCursor<TK, TV>(
+                    _ignite, s.ReadLong(), _keepBinary, s, ClientOp.QuerySqlCursorGetPage));
+        }
+
         /** <inheritDoc /> */
         public IFieldsQueryCursor Query(SqlFieldsQuery sqlFieldsQuery)
         {
@@ -226,6 +237,38 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
             return DoOutInOp(ClientOp.QuerySqlFields,
                 w => WriteSqlFieldsQuery(w, sqlFieldsQuery),
                 s => GetFieldsCursor(s));
+        }
+
+        public Task<IFieldsQueryCursor> QueryAsync(SqlFieldsQuery sqlFieldsQuery)
+        {
+            IgniteArgumentCheck.NotNull(sqlFieldsQuery, "sqlFieldsQuery");
+            IgniteArgumentCheck.NotNull(sqlFieldsQuery.Sql, "sqlFieldsQuery.Sql");
+
+            return DoOutInOpAsync(ClientOp.QuerySqlFields,
+                w => WriteSqlFieldsQuery(w, sqlFieldsQuery),
+                s => (IFieldsQueryCursor) GetFieldsCursor(s));
+        }
+
+        public IQueryCursor<ICacheEntry<TK, TV>>  Query(TextQuery textQuery)
+        {
+            IgniteArgumentCheck.NotNull(textQuery, "textQuery");
+            IgniteArgumentCheck.NotNull(textQuery.Text, "textQuery.Text");
+
+            return DoOutInOp(ClientOp.QueryText,
+                w => WriteTextQuery(w, textQuery),
+                s => new ClientQueryCursor<TK, TV>(
+                    _ignite, s.ReadLong(), _keepBinary, s, ClientOp.QueryTextCursorGetPage));
+        }
+
+        public Task<IQueryCursor<ICacheEntry<TK, TV>>>  QueryAsync(TextQuery textQuery)
+        {
+            IgniteArgumentCheck.NotNull(textQuery, "textQuery");
+            IgniteArgumentCheck.NotNull(textQuery.Text, "textQuery.Text");
+
+            return DoOutInOpAsync(ClientOp.QueryText,
+                w => WriteTextQuery(w, textQuery),
+                s => (IQueryCursor<ICacheEntry<TK, TV>>) new ClientQueryCursor<TK, TV>(
+                    _ignite, s.ReadLong(), _keepBinary, s, ClientOp.QueryTextCursorGetPage));
         }
 
         /** <inheritDoc /> */
@@ -685,6 +728,19 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
 #pragma warning restore 618
             writer.WriteInt(qry.PageSize);
             writer.WriteTimeSpanAsLong(qry.Timeout);
+        }
+        
+        /// <summary>
+        /// Writes the SQL query.
+        /// </summary>
+        private static void WriteTextQuery(IBinaryRawWriter writer, TextQuery qry)
+        {
+            Debug.Assert(qry != null);
+
+            writer.WriteString(qry.QueryType);
+            writer.WriteString(qry.Text);
+            writer.WriteBoolean(qry.Local);
+            writer.WriteInt(qry.PageSize);
         }
 
         /// <summary>

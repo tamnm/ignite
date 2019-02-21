@@ -69,26 +69,8 @@ import org.h2.command.dml.SelectUnion;
 import org.h2.command.dml.Update;
 import org.h2.engine.Constants;
 import org.h2.engine.FunctionAlias;
-import org.h2.expression.Aggregate;
-import org.h2.expression.Alias;
-import org.h2.expression.CompareLike;
-import org.h2.expression.Comparison;
-import org.h2.expression.ConditionAndOr;
-import org.h2.expression.ConditionExists;
-import org.h2.expression.ConditionIn;
-import org.h2.expression.ConditionInConstantSet;
-import org.h2.expression.ConditionInSelect;
-import org.h2.expression.ConditionNot;
-import org.h2.expression.Expression;
-import org.h2.expression.ExpressionColumn;
-import org.h2.expression.ExpressionList;
-import org.h2.expression.Function;
-import org.h2.expression.JavaFunction;
-import org.h2.expression.Operation;
-import org.h2.expression.Parameter;
-import org.h2.expression.Subquery;
-import org.h2.expression.TableFunction;
-import org.h2.expression.ValueExpression;
+import org.h2.engine.UserAggregate;
+import org.h2.expression.*;
 import org.h2.index.ViewIndex;
 import org.h2.jdbc.JdbcPreparedStatement;
 import org.h2.result.SortOrder;
@@ -251,6 +233,12 @@ public class GridSqlQueryParser {
     /** */
     private static final Getter<Aggregate, ArrayList<SelectOrderBy>> GROUP_CONCAT_ORDER_LIST = getter(Aggregate.class,
         "groupConcatOrderList");
+
+    /** */
+    private static final Getter<JavaAggregate, Expression[]> JAVA_AGG_ARGS = getter(JavaAggregate.class, "args");
+
+    /** */
+    private static final Getter<JavaAggregate, UserAggregate> JAVA_AGG_USER_AGG = getter(JavaAggregate.class, "userAggregate");
 
     /** */
     private static final Getter<RangeTable, Expression> RANGE_MIN = getter(RangeTable.class, "min");
@@ -2263,6 +2251,22 @@ public class GridSqlQueryParser {
 
                 return res;
             }
+        }
+
+        if(expression instanceof JavaAggregate){
+            UserAggregate userAggregate = JAVA_AGG_USER_AGG.get((JavaAggregate) expression);
+
+            GridJavaAggregateFunction res = new GridJavaAggregateFunction(userAggregate.getName());
+
+            Expression[] args = JAVA_AGG_ARGS.get((JavaAggregate) expression);
+
+            if (!F.isEmpty(args)){
+                for(Expression e:args){
+                    res.addChild(parseExpression(e, calcTypes));
+                }
+            }
+
+            return res;
         }
 
         if (expression instanceof ExpressionList) {

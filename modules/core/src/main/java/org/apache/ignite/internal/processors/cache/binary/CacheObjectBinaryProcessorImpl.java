@@ -216,7 +216,9 @@ public class CacheObjectBinaryProcessorImpl extends GridProcessorAdapter impleme
                     assert newMeta instanceof BinaryTypeImpl;
 
                     if (!discoveryStarted) {
-                        BinaryMetadataHolder holder = metadataLocCache.get(typeId);
+                        BinaryMetadataHolder holder = isSafeToOverride(ctx, typeId)
+                                ?null
+                                : metadataLocCache.get(typeId);
 
                         BinaryMetadata oldMeta = holder != null ? holder.metadata() : null;
 
@@ -525,10 +527,13 @@ public class CacheObjectBinaryProcessorImpl extends GridProcessorAdapter impleme
         assert newMeta != null;
         assert newMeta instanceof BinaryTypeImpl;
 
+
         BinaryMetadata newMeta0 = ((BinaryTypeImpl)newMeta).metadata();
 
         try {
-            BinaryMetadataHolder metaHolder = metadataLocCache.get(typeId);
+            BinaryMetadataHolder metaHolder = isSafeToOverride(ctx, typeId)
+                    ? null
+                    :metadataLocCache.get(typeId);
 
             BinaryMetadata oldMeta = metaHolder != null ? metaHolder.metadata() : null;
 
@@ -591,6 +596,32 @@ public class CacheObjectBinaryProcessorImpl extends GridProcessorAdapter impleme
         }
     }
 
+    protected static boolean isSafeToOverride(GridKernalContext ctx, int typeId) throws BinaryObjectException {
+
+        IgniteCacheObjectProcessor objProc = ctx.cacheObjects();
+        if(objProc instanceof CacheObjectBinaryProcessorImpl){
+            BinaryContext bc = ((CacheObjectBinaryProcessorImpl)objProc).marshaller().context();
+
+            for(org.apache.ignite.internal.processors.cache.IgniteInternalCache<?, ?> c : ctx.cache().caches()) {
+                CacheConfiguration<?,?> cacheConfig =c.configuration();
+
+                Class keyType =cacheConfig.getKeyType();
+                Class valueType = cacheConfig.getValueType();
+
+                int keyTypeId = bc.descriptorForClass(keyType,true,false).typeId();
+                int valueTypeId = bc.descriptorForClass(valueType,true,false).typeId();
+
+                if(typeId == valueTypeId || typeId == keyTypeId) {
+                    if(c.size()>0) return false; // if Type is using in Cache then it will be not free to override
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     /** {@inheritDoc} */
     @Override public void addMetaLocally(int typeId, BinaryType newMeta) throws BinaryObjectException {
         assert newMeta != null;
@@ -598,15 +629,17 @@ public class CacheObjectBinaryProcessorImpl extends GridProcessorAdapter impleme
 
         BinaryMetadata newMeta0 = ((BinaryTypeImpl)newMeta).metadata();
 
-        BinaryMetadataHolder metaHolder = metadataLocCache.get(typeId);
+        BinaryMetadataHolder metaHolder = isSafeToOverride(ctx, typeId)?null: metadataLocCache.get(typeId);
 
         BinaryMetadata oldMeta = metaHolder != null ? metaHolder.metadata() : null;
 
         try {
-            BinaryMetadata mergedMeta = BinaryUtils.mergeMetadata(oldMeta, newMeta0);
+            BinaryMetadata mergedMeta = oldMeta!= null
+                    ?newMeta0
+                    :BinaryUtils.mergeMetadata(oldMeta, newMeta0);
 
             if (!ctx.clientNode())
-                metadataFileStore.mergeAndWriteMetadata(mergedMeta);
+                metadataFileStore.writeMetadata(newMeta0);
 
             metadataLocCache.put(typeId, new BinaryMetadataHolder(mergedMeta, 0, 0));
         }

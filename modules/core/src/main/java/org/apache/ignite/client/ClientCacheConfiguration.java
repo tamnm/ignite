@@ -25,8 +25,13 @@ import org.apache.ignite.cache.CacheRebalanceMode;
 import org.apache.ignite.cache.CacheWriteSynchronizationMode;
 import org.apache.ignite.cache.PartitionLossPolicy;
 import org.apache.ignite.cache.QueryEntity;
+import org.apache.ignite.cache.store.CacheStore;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.internal.util.typedef.internal.S;
+
+import javax.cache.configuration.Factory;
+import javax.cache.expiry.EternalExpiryPolicy;
+import javax.cache.expiry.ExpiryPolicy;
 
 /** Cache configuration. */
 public final class ClientCacheConfiguration implements Serializable {
@@ -123,6 +128,12 @@ public final class ClientCacheConfiguration implements Serializable {
     /** @serial Query entities. */
     private QueryEntity[] qryEntities = null;
 
+    /** */
+    private Boolean storeKeepBinary = CacheConfiguration.DFLT_STORE_KEEP_BINARY;
+
+    /** @serial expiry policy factory*/
+    protected Factory<? extends ExpiryPolicy> expiryPolicyFactory;
+
     /**
      * @return Cache name.
      */
@@ -204,6 +215,54 @@ public final class ClientCacheConfiguration implements Serializable {
      */
     public ClientCacheConfiguration setEagerTtl(boolean eagerTtl) {
         this.eagerTtl = eagerTtl;
+
+        return this;
+    }
+
+    public Factory<? extends ExpiryPolicy> getExpiryPolicyFactory() {
+        return this.expiryPolicyFactory;
+    }
+
+    public ClientCacheConfiguration setExpiryPolicyFactory(Factory<? extends ExpiryPolicy> factory) {
+        if (factory == null) {
+            this.expiryPolicyFactory = EternalExpiryPolicy.factoryOf();
+        } else {
+            this.expiryPolicyFactory = factory;
+        }
+
+        return this;
+    }
+
+    /**
+     * Flag indicating that {@link CacheStore} implementation
+     * is working with binary objects instead of Java objects.
+     * Default value of this flag is CacheConfiguration.DFLT_STORE_KEEP_BINARY.
+     * <p>
+     * If set to {@code false}, Ignite will deserialize keys and
+     * values stored in binary format before they are passed
+     * to cache store.
+     * <p>
+     * Note that setting this flag to {@code false} can simplify
+     * store implementation in some cases, but it can cause performance
+     * degradation due to additional serializations and deserializations
+     * of binary objects. You will also need to have key and value
+     * classes on all nodes since binary will be deserialized when
+     * store is called.
+     *
+     * @return Keep binary in store flag.
+     */
+    public Boolean isStoreKeepBinary() {
+        return storeKeepBinary;
+    }
+
+    /**
+     * Sets keep binary in store flag.
+     *
+     * @param storeKeepBinary Keep binary in store flag.
+     * @return {@code this} for chaining.
+     */
+    public ClientCacheConfiguration setStoreKeepBinary(boolean storeKeepBinary) {
+        this.storeKeepBinary = storeKeepBinary;
 
         return this;
     }
