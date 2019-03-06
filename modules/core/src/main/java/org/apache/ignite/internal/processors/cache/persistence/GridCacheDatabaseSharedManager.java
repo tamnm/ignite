@@ -63,13 +63,7 @@ import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.cluster.ClusterNode;
-import org.apache.ignite.configuration.CacheConfiguration;
-import org.apache.ignite.configuration.CheckpointWriteOrder;
-import org.apache.ignite.configuration.DataPageEvictionMode;
-import org.apache.ignite.configuration.DataRegionConfiguration;
-import org.apache.ignite.configuration.DataStorageConfiguration;
-import org.apache.ignite.configuration.IgniteConfiguration;
-import org.apache.ignite.configuration.NearCacheConfiguration;
+import org.apache.ignite.configuration.*;
 import org.apache.ignite.events.DiscoveryEvent;
 import org.apache.ignite.events.EventType;
 import org.apache.ignite.failure.FailureContext;
@@ -796,6 +790,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     @Override public void readCheckpointAndRestoreMemory(
         List<DynamicCacheDescriptor> cachesToStart
     ) throws IgniteCheckedException {
+
         assert !cctx.localNode().isClient();
 
         long time = System.currentTimeMillis();
@@ -1366,9 +1361,11 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                     */
 
                     //TAM: hack need to rebuildIndexes when indexes is missing or cluster is not active. this hack is for Lucene indexes
-                    boolean shouldRebuildIndexes = cacheCtx.group().persistenceEnabled();
+                    //boolean shouldRebuildIndexes = cacheCtx.group().persistenceEnabled();
 
-                    if (shouldRebuildIndexes) {
+                    //if (shouldRebuildIndexes) {
+                    if (!cctx.pageStore().hasIndexStore(cacheCtx.groupId()) && cacheCtx.affinityNode()
+                            && cacheCtx.group().persistenceEnabled()) {
                         IgniteInternalFuture<?> rebuildFut = cctx.kernalContext().query()
                             .rebuildIndexesFromHash(Collections.singleton(cacheCtx.cacheId()));
 

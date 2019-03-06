@@ -18,24 +18,33 @@
 package org.apache.ignite.internal.processors.query.h2.opt;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.processors.cache.CacheObject;
 import org.apache.ignite.internal.processors.cache.CacheObjectContext;
+import org.apache.ignite.internal.processors.cache.persistence.filename.PdsFolderSettings;
 import org.apache.ignite.internal.processors.cache.version.GridCacheVersion;
 import org.apache.ignite.internal.processors.query.GridQueryIndexDescriptor;
 import org.apache.ignite.internal.processors.query.GridQueryTypeDescriptor;
 import org.apache.ignite.internal.util.GridAtomicLong;
 import org.apache.ignite.internal.util.GridCloseableIteratorAdapter;
+import org.apache.ignite.internal.util.GridEmptyCloseableIterator;
 import org.apache.ignite.internal.util.lang.GridCloseableIterator;
 import org.apache.ignite.internal.util.offheap.unsafe.GridUnsafeMemory;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.spi.indexing.IndexingQueryFilter;
 import org.apache.ignite.spi.indexing.IndexingQueryCacheFilter;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
+import org.apache.lucene.analysis.miscellaneous.LengthFilter;
+import org.apache.lucene.analysis.ngram.NGramTokenFilter;
+import org.apache.lucene.analysis.ngram.NGramTokenizer;
+import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.LongPoint;
@@ -48,12 +57,8 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
 import org.apache.lucene.util.BytesRef;
 import org.h2.util.JdbcUtils;
 import org.jetbrains.annotations.Nullable;
@@ -83,6 +88,12 @@ public class GridLuceneIndex implements AutoCloseable {
     /** */
     private final IndexWriter writer;
 
+    private DirectoryReader reader;
+
+    private IndexSearcher searcher;
+
+    private Analyzer queryAnalyzer;
+
     /** */
     private final String[] idxdFields;
 
@@ -90,7 +101,7 @@ public class GridLuceneIndex implements AutoCloseable {
     private final AtomicLong updateCntr = new GridAtomicLong();
 
     /** */
-    private final GridLuceneDirectory dir;
+    private final BaseDirectory dir;
 
     /** */
     private final GridKernalContext ctx;
@@ -109,10 +120,52 @@ public class GridLuceneIndex implements AutoCloseable {
         this.cacheName = cacheName;
         this.type = type;
 
-        dir = new GridLuceneDirectory(new GridUnsafeMemory(0));
+        boolean isPersist = ctx.cache().internalCache(cacheName).context().group().persistenceEnabled();
 
         try {
-            writer = new IndexWriter(dir, new IndexWriterConfig(new StandardAnalyzer()));
+
+            final PdsFolderSettings folderSettings = ctx.pdsFolderResolver().resolveFolders();
+
+            Path path =Paths.get(folderSettings.persistentStoreRootPath().getPath(), folderSettings.folderName(), "LuceneIndex-"+cacheName);
+
+            dir =
+                    isPersist
+                            ? FSDirectory.open(path)
+                            : new GridLuceneDirectory(new GridUnsafeMemory(0));
+
+            IndexWriterConfig writerConfig = new IndexWriterConfig(new Analyzer() {
+
+                @Override
+                protected TokenStreamComponents createComponents(String fieldName) {
+                    Tokenizer tokenizer = new StandardTokenizer();
+
+                    TokenStream stream = tokenizer;
+                    stream = new NGramTokenFilter(stream,2,20,false);
+                    stream = new ASCIIFoldingFilter(stream);
+                    stream = new LowerCaseFilter(stream);
+                    return new TokenStreamComponents(tokenizer, stream);
+                }
+            });
+
+            queryAnalyzer =  new Analyzer() {
+                @Override
+                protected TokenStreamComponents createComponents(String s) {
+                    Tokenizer tokenizer = new StandardTokenizer();
+
+                    TokenStream stream = tokenizer;
+                    stream = new ASCIIFoldingFilter(stream);
+                    stream = new LowerCaseFilter(stream);
+                    stream = new LengthFilter(stream, 2,20);
+                    return new TokenStreamComponents(tokenizer, stream);
+                }
+            };
+
+            writer = new IndexWriter(dir, writerConfig);
+
+            if(DirectoryReader.indexExists(dir)) {
+                reader = DirectoryReader.open(dir);
+                searcher = new IndexSearcher(reader);
+            }
         }
         catch (IOException e) {
             throw new IgniteCheckedException(e);
@@ -189,7 +242,6 @@ public class GridLuceneIndex implements AutoCloseable {
 
             if (!stringsFound) {
                 writer.deleteDocuments(term);
-
                 return; // We did not find any strings to be indexed, will not store data at all.
             }
 
@@ -242,8 +294,6 @@ public class GridLuceneIndex implements AutoCloseable {
      * @throws IgniteCheckedException If failed.
      */
     public <K, V> GridCloseableIterator<IgniteBiTuple<K, V>> query(String qry, IndexingQueryFilter filters, int pageSize) throws IgniteCheckedException {
-        IndexReader reader;
-
         try {
             long updates = updateCntr.get();
 
@@ -254,21 +304,32 @@ public class GridLuceneIndex implements AutoCloseable {
             }
 
             //We can cache reader\searcher and change this to 'openIfChanged'
-            reader = DirectoryReader.open(writer);
+            if(reader == null) {
+                if(DirectoryReader.indexExists(dir)){
+                    reader = DirectoryReader.open(writer);
+                    searcher = new IndexSearcher(reader);
+                }
+                else
+                    return new GridEmptyCloseableIterator<>();
+            }else {
+                DirectoryReader newReader = DirectoryReader.openIfChanged(reader);
+
+                if(newReader != null){
+                    reader= newReader;
+                    searcher = new IndexSearcher(reader);
+                }
+            }
         }
         catch (IOException e) {
             throw new IgniteCheckedException(e);
         }
 
-        IndexSearcher searcher;
 
         Query query;
 
         try {
-            searcher = new IndexSearcher(reader);
 
-            MultiFieldQueryParser parser = new MultiFieldQueryParser(idxdFields,
-                writer.getAnalyzer());
+            MultiFieldQueryParser parser = new MultiFieldQueryParser(idxdFields, queryAnalyzer);
 
 //            parser.setAllowLeadingWildcard(true);
 
@@ -281,7 +342,7 @@ public class GridLuceneIndex implements AutoCloseable {
                 .build();
         }
         catch (Exception e) {
-            U.closeQuiet(reader);
+            //U.closeQuiet(reader);
 
             throw new IgniteCheckedException(e);
         }
@@ -311,6 +372,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
         /** */
         private final int pageSize;
+        private final int take;
 
         /** */
         private final IndexReader reader;
@@ -351,6 +413,7 @@ public class GridLuceneIndex implements AutoCloseable {
             this.filters = filters;
             this.query = query;
             this.pageSize = pageSize;
+            this.take = pageSize;
 
             coctx = objectContext();
 
@@ -444,10 +507,18 @@ public class GridLuceneIndex implements AutoCloseable {
             if (batch == null) {
                 docs = searcher.search(query, pageSize);
             } else {
-                docs = searcher.searchAfter(batch[batch.length - 1], query, pageSize);
+
+                int read = batch.length*pageSize;
+
+                int remains = take - read;
+                remains = Math.min(pageSize, remains);
+
+                if(remains > 0)
+                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains);
+                else docs = null;
             }
 
-            if(docs.scoreDocs.length ==0) {
+            if(docs == null || docs.scoreDocs.length ==0) {
                 batch = null;
             }else{
                 batch = docs.scoreDocs;
@@ -472,7 +543,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
         /** {@inheritDoc} */
         @Override protected void onClose() throws IgniteCheckedException {
-            U.closeQuiet(reader);
+            //U.closeQuiet(reader);
         }
 
 

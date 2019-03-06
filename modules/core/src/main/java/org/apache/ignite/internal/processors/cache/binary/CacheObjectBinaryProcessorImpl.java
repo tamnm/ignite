@@ -59,12 +59,8 @@ import org.apache.ignite.internal.binary.builder.BinaryObjectBuilderImpl;
 import org.apache.ignite.internal.binary.streams.BinaryInputStream;
 import org.apache.ignite.internal.binary.streams.BinaryOffheapInputStream;
 import org.apache.ignite.internal.managers.eventstorage.GridLocalEventListener;
-import org.apache.ignite.internal.processors.cache.CacheObject;
-import org.apache.ignite.internal.processors.cache.CacheObjectContext;
-import org.apache.ignite.internal.processors.cache.CacheObjectValueContext;
-import org.apache.ignite.internal.processors.cache.GridCacheContext;
-import org.apache.ignite.internal.processors.cache.GridCacheUtils;
-import org.apache.ignite.internal.processors.cache.KeyCacheObject;
+import org.apache.ignite.internal.processors.cache.*;
+import org.apache.ignite.internal.processors.cacheobject.IgniteCacheObjectProcessor;
 import org.apache.ignite.internal.processors.cacheobject.IgniteCacheObjectProcessorImpl;
 import org.apache.ignite.internal.util.GridUnsafe;
 import org.apache.ignite.internal.util.IgniteUtils;
@@ -169,7 +165,9 @@ public class CacheObjectBinaryProcessorImpl extends IgniteCacheObjectProcessorIm
                     assert newMeta instanceof BinaryTypeImpl;
 
                     if (!discoveryStarted) {
-                        BinaryMetadataHolder holder = metadataLocCache.get(typeId);
+                        BinaryMetadataHolder holder = isSafeToOverride(ctx, typeId)
+                                ?null
+                                : metadataLocCache.get(typeId);
 
                         BinaryMetadata oldMeta = holder != null ? holder.metadata() : null;
 
@@ -445,10 +443,13 @@ public class CacheObjectBinaryProcessorImpl extends IgniteCacheObjectProcessorIm
         assert newMeta != null;
         assert newMeta instanceof BinaryTypeImpl;
 
+
         BinaryMetadata newMeta0 = ((BinaryTypeImpl)newMeta).metadata();
 
         try {
-            BinaryMetadataHolder metaHolder = metadataLocCache.get(typeId);
+            BinaryMetadataHolder metaHolder = isSafeToOverride(ctx, typeId)
+                    ? null
+                    :metadataLocCache.get(typeId);
 
             BinaryMetadata oldMeta = metaHolder != null ? metaHolder.metadata() : null;
 
@@ -478,6 +479,32 @@ public class CacheObjectBinaryProcessorImpl extends IgniteCacheObjectProcessorIm
         }
     }
 
+    protected static boolean isSafeToOverride(GridKernalContext ctx, int typeId) throws BinaryObjectException {
+
+        IgniteCacheObjectProcessor objProc = ctx.cacheObjects();
+        if(objProc instanceof CacheObjectBinaryProcessor){
+            BinaryContext bc = ((CacheObjectBinaryProcessorImpl)objProc).marshaller().context();
+
+            for(IgniteInternalCache<?, ?> c : ctx.cache().caches()) {
+                CacheConfiguration<?,?> cacheConfig =c.configuration();
+
+                Class keyType =cacheConfig.getKeyType();
+                Class valueType = cacheConfig.getValueType();
+
+                int keyTypeId = bc.descriptorForClass(keyType,true,false).typeId();
+                int valueTypeId = bc.descriptorForClass(valueType,true,false).typeId();
+
+                if(typeId == valueTypeId || typeId == keyTypeId) {
+                    if(c.size()>0) return false; // if Type is using in Cache then it will be not free to override
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     /** {@inheritDoc} */
     @Override public void addMetaLocally(int typeId, BinaryType newMeta) throws BinaryObjectException {
         assert newMeta != null;
@@ -485,15 +512,17 @@ public class CacheObjectBinaryProcessorImpl extends IgniteCacheObjectProcessorIm
 
         BinaryMetadata newMeta0 = ((BinaryTypeImpl)newMeta).metadata();
 
-        BinaryMetadataHolder metaHolder = metadataLocCache.get(typeId);
+        BinaryMetadataHolder metaHolder = isSafeToOverride(ctx, typeId)?null: metadataLocCache.get(typeId);
 
         BinaryMetadata oldMeta = metaHolder != null ? metaHolder.metadata() : null;
 
         try {
-            BinaryMetadata mergedMeta = BinaryUtils.mergeMetadata(oldMeta, newMeta0);
+            BinaryMetadata mergedMeta = oldMeta!= null
+                    ?newMeta0
+                    :BinaryUtils.mergeMetadata(oldMeta, newMeta0);
 
             if (!ctx.clientNode())
-                metadataFileStore.mergeAndWriteMetadata(mergedMeta);
+                metadataFileStore.writeMetadata(newMeta0);
 
             metadataLocCache.put(typeId, new BinaryMetadataHolder(mergedMeta, 0, 0));
         }

@@ -261,7 +261,9 @@ final class BinaryMetadataTransport {
         @Override public void onCustomEvent(AffinityTopologyVersion topVer, ClusterNode snd, MetadataUpdateProposedMessage msg) {
             int typeId = msg.typeId();
 
-            BinaryMetadataHolder holder = metaLocCache.get(typeId);
+            BinaryMetadataHolder holder = CacheObjectBinaryProcessorImpl.isSafeToOverride(ctx, typeId)
+                    ?null
+                    :metaLocCache.get(typeId);
 
             int pendingVer;
             int acceptedVer;
