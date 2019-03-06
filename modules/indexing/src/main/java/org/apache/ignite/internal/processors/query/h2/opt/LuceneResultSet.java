@@ -2291,6 +2291,8 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
 
                 assert v != null;
 
+                v[v.length-1] = scoreDoc.score;
+
                 curr = v;
 
                 break;
@@ -2307,7 +2309,6 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
             for(int i =1;i<columns.length;i++){
                 values[offset++] = doc.get(columns[i].getName());
             }
-
             return values;
 
         }
