@@ -155,6 +155,7 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <param name="sqlQuery">SQL query.</param>
         /// <returns>Query cursor.</returns>
         IQueryCursor<ICacheEntry<TK, TV>> Query(SqlQuery sqlQuery);
+        Task<IQueryCursor<ICacheEntry<TK, TV>>> QueryAsync(SqlQuery sqlQuery);
 
         /// <summary>
         /// Executes an SQL Fields query.
@@ -162,6 +163,7 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <param name="sqlFieldsQuery">SQL query.</param>
         /// <returns>Query cursor.</returns>
         IFieldsQueryCursor Query(SqlFieldsQuery sqlFieldsQuery);
+        Task<IFieldsQueryCursor> QueryAsync(SqlFieldsQuery sqlFieldsQuery);
 
         /// <summary>
         /// Executes an Text query.
@@ -169,6 +171,8 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <param name="textQuery">Text query.</param>
         /// <returns>Query cursor.</returns>
         IQueryCursor<ICacheEntry<TK, TV>>  Query(TextQuery textQuery);
+
+        Task<IQueryCursor<ICacheEntry<TK, TV>>>  QueryAsync(TextQuery textQuery);
 
         /// <summary>
         /// Associates the specified value with the specified key in this cache,

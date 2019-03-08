@@ -139,15 +139,30 @@ namespace Apache.Ignite.Core.Tests.Client.Cache
             return _cache.Query(sqlQuery);
         }
 
+        public Task<IQueryCursor<ICacheEntry<TK, TV>>> QueryAsync(SqlQuery sqlQuery)
+        {
+            return _cache.QueryAsync(sqlQuery);
+        }
+
         /** <inheritDoc /> */
         public IFieldsQueryCursor Query(SqlFieldsQuery sqlFieldsQuery)
         {
             return _cache.Query(sqlFieldsQuery);
         }
 
+        public Task<IFieldsQueryCursor> QueryAsync(SqlFieldsQuery sqlFieldsQuery)
+        {
+            return _cache.QueryAsync(sqlFieldsQuery);
+        }
+
         public IQueryCursor<ICacheEntry<TK, TV>> Query(TextQuery textQuery)
         {
             return _cache.Query(textQuery);
+        }
+
+        public Task<IQueryCursor<ICacheEntry<TK, TV>>> QueryAsync(TextQuery textQuery)
+        {
+            return _cache.QueryAsync(textQuery);
         }
 
         /** <inheritDoc /> */
