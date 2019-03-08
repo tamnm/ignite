@@ -2346,7 +2346,7 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
                 docs = searcher.search(query, remains0);
             } else {
                 if(remains0 > 0){
-                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0, Sort.RELEVANCE);
+                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0);
                 }
                 else {
                     docs = null;

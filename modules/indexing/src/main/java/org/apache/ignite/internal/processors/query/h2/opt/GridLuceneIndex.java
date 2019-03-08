@@ -137,8 +137,11 @@ public class GridLuceneIndex implements AutoCloseable {
         CacheConfiguration<?,?>  cacheConfig = ctx.cache().internalCache(cacheName).configuration();
 
         List<String> keyFields = new ArrayList<>();
+
         for(QueryEntity qe : cacheConfig.getQueryEntities()) {
-            for(String k : qe.getKeyFields()){
+            Set<String> qeKeyFields = qe.getKeyFields();
+            if(qeKeyFields != null)
+            for(String k : qeKeyFields){
                 keyFields.add(k.toUpperCase());
             }
         }
@@ -545,13 +548,13 @@ public class GridLuceneIndex implements AutoCloseable {
 
         private void requestNextBatch() throws IOException {
             TopDocs docs;
-            int remains = Math.min(pageSize, this.remains);
+            int remains0 = Math.min(pageSize, this.remains);
 
             if (batch == null) {
-                docs = searcher.search(query, remains);
+                docs = searcher.search(query, remains0);
             } else {
-                if(remains > 0){
-                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains, Sort.RELEVANCE);
+                if(remains0 > 0){
+                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0);
                 }
                 else {
                     docs = null;
@@ -560,9 +563,12 @@ public class GridLuceneIndex implements AutoCloseable {
 
             if(docs == null || docs.scoreDocs.length ==0) {
                 batch = null;
-            }else{
+            }else {
                 batch = docs.scoreDocs;
-                this.remains -= batch.length;
+                if (batch.length >= remains0)
+                    this.remains -= batch.length;
+                else
+                    this.remains = 0;
             }
 
             batchPos = 0;
@@ -606,6 +612,8 @@ public class GridLuceneIndex implements AutoCloseable {
             GridLuceneIndex c = luceneIndexes.getOrDefault(table, null);
             if(c == null)
                 throw new SQLException("Table was not found: "+ table);
+
+            qry  = qry.toUpperCase();
 
             Session session = (Session) ((JdbcConnection)conn).getSession();
 
