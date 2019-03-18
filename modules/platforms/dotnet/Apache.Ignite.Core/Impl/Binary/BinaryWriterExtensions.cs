@@ -21,6 +21,7 @@ namespace Apache.Ignite.Core.Impl.Binary
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
+    using System.Linq;
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Impl.Client;
 
@@ -129,6 +130,17 @@ namespace Apache.Ignite.Core.Impl.Binary
         }
 
         /// <summary>
+        /// Write enumerable ordered.
+        /// </summary>
+        /// <param name="writer">Writer.</param>
+        /// <param name="vals">Values.</param>
+        /// <returns>The same writer for chaining.</returns>
+        public static void WriteEnumerableOrdered<T>(this BinaryWriter writer, IEnumerable<T> vals)
+        {
+            WriteEnumerable<T, T>(writer, vals.OrderBy(x=>x), null);
+        }
+
+        /// <summary>
         /// Write enumerable.
         /// </summary>
         /// <param name="writer">Writer.</param>
@@ -188,7 +200,7 @@ namespace Apache.Ignite.Core.Impl.Binary
 
             int cnt = 0;
 
-            foreach (var pair in vals)
+            foreach (var pair in vals.OrderBy(x=>x.Key))
             {
                 writer.WriteObjectDetached(pair.Key);
                 writer.WriteObjectDetached(pair.Value);

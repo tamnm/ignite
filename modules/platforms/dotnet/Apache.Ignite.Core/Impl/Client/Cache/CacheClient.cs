@@ -132,7 +132,7 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
         {
             IgniteArgumentCheck.NotNull(keys, "keys");
 
-            return DoOutInOp(ClientOp.CacheGetAll, w => w.WriteEnumerable(keys), s => ReadCacheEntries(s));
+            return DoOutInOp(ClientOp.CacheGetAll, w => w.WriteEnumerableOrdered(keys), s => ReadCacheEntries(s));
         }
 
         /** <inheritDoc /> */
@@ -140,7 +140,7 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
         {
             IgniteArgumentCheck.NotNull(keys, "keys");
 
-            return DoOutInOpAsync(ClientOp.CacheGetAll, w => w.WriteEnumerable(keys), s => ReadCacheEntries(s));
+            return DoOutInOpAsync(ClientOp.CacheGetAll, w => w.WriteEnumerableOrdered(keys), s => ReadCacheEntries(s));
         }
 
         /** <inheritDoc /> */
@@ -275,6 +275,13 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
         public IQueryCursor<T> Query<T>(SqlFieldsQuery sqlFieldsQuery, Func<IBinaryRawReader, int, T> readerFunc)
         {
             return DoOutInOp(ClientOp.QuerySqlFields,
+                w => WriteSqlFieldsQuery(w, sqlFieldsQuery, false),
+                s => GetFieldsCursorNoColumnNames(s, readerFunc));
+        }
+
+        public async Task<IQueryCursor<T>> QueryAsync<T>(SqlFieldsQuery sqlFieldsQuery, Func<IBinaryRawReader, int, T> readerFunc)
+        {
+            return await DoOutInOpAsync(ClientOp.QuerySqlFields,
                 w => WriteSqlFieldsQuery(w, sqlFieldsQuery, false),
                 s => GetFieldsCursorNoColumnNames(s, readerFunc));
         }

@@ -18,6 +18,7 @@
 namespace Apache.Ignite.Core.Impl.Cache
 {
     using System;
+    using System.Threading.Tasks;
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Cache.Configuration;
     using Apache.Ignite.Core.Cache.Query;
@@ -37,6 +38,8 @@ namespace Apache.Ignite.Core.Impl.Cache
         /// Cursor.
         /// </returns>
         IQueryCursor<T> Query<T>(SqlFieldsQuery qry, Func<IBinaryRawReader, int, T> readerFunc);
+
+        Task<IQueryCursor<T>> QueryAsync<T>(SqlFieldsQuery qry, Func<IBinaryRawReader, int, T> readerFunc);
 
         /// <summary>
         /// Invokes a cache extension.

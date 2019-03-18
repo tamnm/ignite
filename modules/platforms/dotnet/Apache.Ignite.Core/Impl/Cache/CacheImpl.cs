@@ -21,6 +21,7 @@ namespace Apache.Ignite.Core.Impl.Cache
     using System.Collections;
     using System.Collections.Generic;
     using System.Diagnostics.CodeAnalysis;
+    using System.Linq;
     using System.Threading.Tasks;
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Cache;
@@ -442,7 +443,7 @@ namespace Apache.Ignite.Core.Impl.Cache
             IgniteArgumentCheck.NotNull(keys, "keys");
 
             return DoOutInOpX((int) CacheOp.GetAll,
-                writer => writer.WriteEnumerable(keys),
+                writer => writer.WriteEnumerable(keys.OrderBy(x=>x)),
                 (s, r) => r == True ? ReadGetAllDictionary(Marshaller.StartUnmarshal(s, _flagKeepBinary)) : null,
                 _readException);
         }
@@ -1110,6 +1111,14 @@ namespace Apache.Ignite.Core.Impl.Cache
             return new FieldsQueryCursor<T>(cursor, _flagKeepBinary, readerFunc);
         }
 
+        /** <inheritDoc /> */
+        public async Task<IQueryCursor<T>> QueryAsync<T>(SqlFieldsQuery qry, Func<IBinaryRawReader, int, T> readerFunc)
+        {
+            var cursor = await QueryFieldsInternalAsync(qry);
+
+            return new FieldsQueryCursor<T>(cursor, _flagKeepBinary, readerFunc);
+        }
+
         private IPlatformTargetInternal QueryFieldsInternal(SqlFieldsQuery qry)
         {
             IgniteArgumentCheck.NotNull(qry, "qry");
@@ -1135,6 +1144,33 @@ namespace Apache.Ignite.Core.Impl.Cache
                 writer.WriteBoolean(qry.Colocated);
                 writer.WriteString(qry.Schema); // Schema
             });
+        }
+
+        private Task<IPlatformTargetInternal> QueryFieldsInternalAsync(SqlFieldsQuery qry)
+        {
+            IgniteArgumentCheck.NotNull(qry, "qry");
+
+            if (string.IsNullOrEmpty(qry.Sql))
+                throw new ArgumentException("Sql cannot be null or empty");
+
+            return DoOutOpObjectAsync<IPlatformTargetInternal>((int) CacheOp.QrySqlFields, writer =>
+            {
+                writer.WriteBoolean(qry.Local);
+                writer.WriteString(qry.Sql);
+                writer.WriteInt(qry.PageSize);
+
+                QueryBase.WriteQueryArgs(writer, qry.Arguments);
+
+                writer.WriteBoolean(qry.EnableDistributedJoins);
+                writer.WriteBoolean(qry.EnforceJoinOrder);
+                writer.WriteBoolean(qry.Lazy); // Lazy flag.
+                writer.WriteInt((int) qry.Timeout.TotalMilliseconds);
+#pragma warning disable 618
+                writer.WriteBoolean(qry.ReplicatedOnly);
+#pragma warning restore 618
+                writer.WriteBoolean(qry.Colocated);
+                writer.WriteString(qry.Schema); // Schema
+            }).Task;
         }
 
         /** <inheritDoc /> */
