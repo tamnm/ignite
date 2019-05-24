@@ -2317,13 +2317,21 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
             Object[] values = new Object[columns.length];
 
             for(int i =0;i< columns.length;i++){
-                org.h2.table.Column col0 =columns[i];
-                values[i] = col0.isPrimaryKey()
-                        ? key.field(col0.getName())
-                        :doc.get(col0.getName());
+                values[i] = readValue(doc, columns[i], key);
             }
 
             return values;
+        }
+
+        private Object readValue(Document doc, Column col, BinaryObjectImpl key) {
+            if(col.isPrimaryKey())
+                return  key.field(col.getName());
+
+            if (col.getType() == 17) {
+                return doc.getValues(col.getName());
+            }
+
+            return doc.get(col.getName());
         }
 
         private boolean shouldRequestNextBatch()  {

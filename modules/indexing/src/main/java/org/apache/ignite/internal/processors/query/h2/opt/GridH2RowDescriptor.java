@@ -17,6 +17,7 @@
 
 package org.apache.ignite.internal.processors.query.h2.opt;
 
+import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Time;
@@ -252,17 +253,18 @@ public class GridH2RowDescriptor {
             case Value.JAVA_OBJECT:
                 return ValueJavaObject.getNoCopy(obj, null, null);
             case Value.ARRAY:
-                Object[] arr = (Object[])obj;
+                int length = Array.getLength(obj);
 
-                Value[] valArr = new Value[arr.length];
+                Value[] valArr = new Value[length];
+                Class cls = obj.getClass().getComponentType();;
 
-                for (int i = 0; i < arr.length; i++) {
-                    Object o = arr[i];
+                for (int i = 0; i < length; i++) {
+                    Object o = Array.get(obj, i);
 
                     valArr[i] = o == null ? ValueNull.INSTANCE : wrap(o, DataType.getTypeFromClass(o.getClass()));
                 }
 
-                return ValueArray.get(valArr);
+                return NewValueArray.get(cls, valArr);
 
             case Value.GEOMETRY:
                 return ValueGeometry.getFromGeometry(obj);

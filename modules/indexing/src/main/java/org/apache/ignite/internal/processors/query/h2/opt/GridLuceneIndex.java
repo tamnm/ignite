@@ -59,10 +59,7 @@ import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.Term;
+import org.apache.lucene.index.*;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.*;
@@ -256,10 +253,13 @@ public class GridLuceneIndex implements AutoCloseable {
         for (int i = 0, last = idxdFields.length - 1; i < last; i++) {
             Object fieldVal = type.value(idxdFields[i], key, val);
 
-            if (fieldVal != null) {
-                doc.add(new TextField(idxdFields[i], fieldVal.toString(), Field.Store.YES));
+            Collection<IndexableField> fields = GridLuceneFieldFactory.Instance.createFields(idxdFields[i], fieldVal);
 
-                stringsFound = true;
+            if(fields != null){
+                for(IndexableField field : fields){
+                    doc.add(field);
+                    stringsFound = true;
+                }
             }
         }
 
@@ -341,7 +341,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
         try {
 
-            MultiFieldQueryParser parser = new MultiFieldQueryParser(idxdFields, queryAnalyzer);
+            MultiFieldQueryParser parser = new LongPointRangeQueryParser(idxdFields, queryAnalyzer);
 
 //            parser.setAllowLeadingWildcard(true);
 
@@ -624,19 +624,10 @@ public class GridLuceneIndex implements AutoCloseable {
             for(String colName: c.keyFields){
                 if(!table1.doesColumnExist(colName)) continue;
 
-                Column col0 = table1.getColumn(colName);
+                Column col0 = table1.getColumn(colName).getClone();
+                col0.setPrimaryKey(true);
                 assert  col0 != null;
 
-                columns.add(col0);
-            }
-
-            for(String colName : c.idxdFields){
-                if(!table1.doesColumnExist(colName)) continue;
-
-                Column col0 = table1.getColumn(colName);
-                assert  col0 != null;
-
-                if(columns.contains(col0)) continue;
                 columns.add(col0);
             }
 
