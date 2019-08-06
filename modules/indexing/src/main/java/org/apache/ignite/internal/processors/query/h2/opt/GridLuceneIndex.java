@@ -60,6 +60,8 @@ import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.*;
+import org.apache.lucene.queries.CustomScoreProvider;
+import org.apache.lucene.queries.CustomScoreQuery;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.*;
@@ -86,6 +88,13 @@ public class GridLuceneIndex implements AutoCloseable {
 
     /** Field name for value expiration time. */
     public static final String EXPIRATION_TIME_FIELD_NAME = "_gg_expires__";
+
+    /** seperator for sort in lucene query*/
+    public static final String QUERY_BOOST_PREFIX = "_BOOST_BY_";
+
+    public static final String QUERY_SORT_ASC = "ASC";
+
+    public static final String QUERY_SORT_DESC = "DESC";
 
     /** */
     private final String cacheName;
@@ -156,19 +165,25 @@ public class GridLuceneIndex implements AutoCloseable {
                             ? FSDirectory.open(path)
                             : new GridLuceneDirectory(new GridUnsafeMemory(0));
 
-            IndexWriterConfig writerConfig = new IndexWriterConfig(new Analyzer() {
+            Analyzer analyzer = new Analyzer() {
 
                 @Override
                 protected TokenStreamComponents createComponents(String fieldName) {
                     Tokenizer tokenizer = new StandardTokenizer();
 
                     TokenStream stream = tokenizer;
-                    stream = new NGramTokenFilter(stream,2,20,false);
+
+                    stream = new NGramTokenFilter(stream, 2, 20, false);
                     stream = new ASCIIFoldingFilter(stream);
                     stream = new LowerCaseFilter(stream);
                     return new TokenStreamComponents(tokenizer, stream);
                 }
-            });
+            };
+
+            IndexWriterConfig writerConfig = new IndexWriterConfig(analyzer);
+
+            if(isNewCache(ctx, cacheName))
+                writerConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE); //if is new cache we need to create new index. this opt will erase old data and create new one
 
             queryAnalyzer =  new Analyzer() {
                 @Override
@@ -187,7 +202,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
             if(DirectoryReader.indexExists(dir)) {
                 reader = DirectoryReader.open(dir);
-                searcher = new IndexSearcher(reader);
+                createSearcher();
             }
         }
         catch (IOException e) {
@@ -212,6 +227,31 @@ public class GridLuceneIndex implements AutoCloseable {
         idxdFields[idxdFields.length - 1] = VAL_STR_FIELD_NAME;
 
         luceneIndexes.put(cacheName, this);
+    }
+
+    private boolean isNewCache(GridKernalContext ctx, @Nullable String cacheName){
+        int size = ctx.cache().internalCache(cacheName).metrics0().getEntriesStat().size();
+        return size == 0;
+    }
+
+
+    private void createSearcher() {
+        searcher = new IndexSearcher(reader);
+
+//        final ClassicSimilarity similarity = new ClassicSimilarity()
+//        {
+//            @Override
+//            public float tf(float freq) {
+//                return 1;
+//            }
+//
+//            @Override
+//            public float idf(long docFreq, long docCount) {
+//                return 1;
+//            }
+//        };
+//
+//        searcher.setSimilarity(similarity);
     }
 
     /**
@@ -252,6 +292,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
         for (int i = 0, last = idxdFields.length - 1; i < last; i++) {
             Object fieldVal = type.value(idxdFields[i], key, val);
+            if(fieldVal == null) continue;
 
             Collection<IndexableField> fields = GridLuceneFieldFactory.Instance.createFields(idxdFields[i], fieldVal);
 
@@ -336,6 +377,74 @@ public class GridLuceneIndex implements AutoCloseable {
         return new It<>(searcher, query, fltr, rawCache::get, pageSize, 0, pageSize);
     }
 
+    protected Query parseBoostClause(Query query, String boostClause) {
+        if(boostClause == null){
+            return query;
+        }
+
+        String[] boostClauses = boostClause.split(",");
+        Pair<String,Float>[] boostedProperties = new Pair[boostClauses.length];
+
+        for(int i =0;i <boostClauses.length;i++){
+            boostedProperties[i] = ParseBoostProperty(boostClauses[i]);
+        }
+
+        return new BoostedScoreQuery(query, boostedProperties);
+    }
+
+    private static Pair<String, Float> ParseBoostProperty(String boostProperty){
+        int i = boostProperty.indexOf('^');
+        String property = boostProperty.substring(0, i).trim();
+        String rateS = boostProperty.substring(i+1).trim();
+        Float rate = Float.parseFloat(rateS);
+
+        return new Pair<>(property, rate);
+    }
+
+    protected Sort parseSort(String orderClauses) throws IgniteCheckedException {
+        if(orderClauses == null){
+            return null;
+        }
+
+        ArrayList<SortField> sortFields = new ArrayList<>();
+
+        String[] orderByClauses = orderClauses.split(",");
+
+        sortFields.add(SortField.FIELD_SCORE);
+
+        for (String orderByClause : orderByClauses) {
+            sortFields.add(parseSortField(orderByClause));
+        }
+
+        return new Sort(sortFields.toArray(new SortField[0]));
+    }
+
+    private static SortField parseSortField(String orderClause) throws IgniteCheckedException {
+            String[] arr = orderClause.split(" ");
+            String column = null;
+            boolean desc = false;
+
+            for (int i = 0; i < arr.length; i++) {
+                String text = arr[i];
+                if(text == null || text.equals("")) continue;
+                if(column == null) {
+                    column = text;
+                }
+                else {
+                    if(text.equalsIgnoreCase(QUERY_SORT_ASC) || text.equalsIgnoreCase(QUERY_SORT_DESC)){
+                        desc =  text.equalsIgnoreCase(QUERY_SORT_DESC);
+                    }else{
+                        throw new IgniteCheckedException("Bad order clause");
+                    }
+                }
+            }
+
+            if(column == null)
+            throw new IgniteCheckedException("Bad order clause");
+
+        return new SortedNumericSortField(column+"_SORTER",  SortField.Type.LONG, desc);
+    }
+
     protected Query parseQuery(String qry) throws IgniteCheckedException {
         Query query;
 
@@ -358,6 +467,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
             throw new IgniteCheckedException(e);
         }
+
         return query;
     }
 
@@ -375,7 +485,7 @@ public class GridLuceneIndex implements AutoCloseable {
             if(reader == null) {
                 if(DirectoryReader.indexExists(dir)){
                     reader = DirectoryReader.open(writer);
-                    searcher = new IndexSearcher(reader);
+                    createSearcher();
                 }
                 else
                     return false;
@@ -384,7 +494,7 @@ public class GridLuceneIndex implements AutoCloseable {
 
                 if(newReader != null){
                     reader= newReader;
-                    searcher = new IndexSearcher(reader);
+                    createSearcher();
                 }
             }
         }
@@ -601,6 +711,86 @@ public class GridLuceneIndex implements AutoCloseable {
         }
     }
 
+    private static class BoostedScoreQuery extends CustomScoreQuery {
+        private final Pair<String, Float>[] boostedProperties;
+
+        public BoostedScoreQuery(Query subQuery, Pair<String, Float>[] boostedProperties) {
+            super(subQuery);
+            this.boostedProperties = boostedProperties;
+        }
+
+        // The CustomScoreProvider is what actually alters the score
+        private class MyScoreProvider extends CustomScoreProvider {
+
+            private LeafReader reader;
+            private String[] fields;
+            private Set<String> fieldsSet;
+            private Float[] rates;
+
+            public MyScoreProvider(LeafReaderContext context, Pair<String, Float>[] boostedProperties) {
+                super(context);
+                reader = context.reader();
+
+                fields = new String[boostedProperties.length];
+                rates = new Float[boostedProperties.length];
+                fieldsSet = new HashSet<>();
+
+                for (int i = 0; i < boostedProperties.length; i++) {
+                    Pair<String, Float> p = boostedProperties[i];
+                    String name = GridLuceneFieldFactory.NumericStoredName(p.getKey());
+                    fields[i] = name;
+                    rates[i] = p.getValue();
+                    fieldsSet.add(name);
+                }
+            }
+
+            @Override
+            public float customScore(int doc_id, float currentScore, float valSrcScore) throws IOException {
+                if(currentScore<10)
+                    return currentScore;
+
+                Document doc = reader.document(doc_id, fieldsSet);
+
+                float boost = 0;
+
+                for (int i = 0; i < fields.length; i++) {
+                    String fieldName = fields[i];
+                    IndexableField field = doc.getField(fieldName);
+                    if (field == null) continue;
+                    float rate = rates[i];
+
+                    boost += field.numericValue().doubleValue() * rate;
+                }
+
+                return currentScore + boost;
+            }
+        }
+
+        // Make sure that our CustomScoreProvider is being used.
+        @Override
+        public CustomScoreProvider getCustomScoreProvider(LeafReaderContext context) {
+            return new MyScoreProvider(context, boostedProperties);
+        }
+    }
+
+    private static class Pair<K,V>{
+        private K key;
+        private V value;
+
+        private Pair(K key, V value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public K getKey(){
+            return this.key;
+        }
+
+        public V getValue(){
+            return this.value;
+        }
+    }
+
     public static class Functions {
 
         public static final String SCORE_FIELD_NAME = "_SCORE";
@@ -614,6 +804,15 @@ public class GridLuceneIndex implements AutoCloseable {
                 throw new SQLException("Table was not found: "+ table);
 
             qry  = qry.toUpperCase();
+            String boostClauses = null;
+            String[] queryArr = qry.split(QUERY_BOOST_PREFIX);
+
+            if(queryArr.length>2)
+                throw new SQLException("Bad full text search query");
+
+            qry = queryArr[0];
+            if(queryArr.length == 2)
+                boostClauses = queryArr[1];
 
             Session session = (Session) ((JdbcConnection)conn).getSession();
 
@@ -631,20 +830,26 @@ public class GridLuceneIndex implements AutoCloseable {
                 columns.add(col0);
             }
 
-            columns.add(new Column(SCORE_FIELD_NAME, Types.FLOAT));
+            Column scoreColumn = new Column(SCORE_FIELD_NAME, Types.FLOAT);
+            scoreColumn.setNullable(true);
+            scoreColumn.setConvertNullToDefault(true);
+
+            columns.add(scoreColumn);
 
             Iterator<Object[]> iterator = new GridEmptyIterator<>();
 
             try {
                 if (c.prepareQuery()){
                     Query query = c.parseQuery(qry);
+                    query = c.parseBoostClause(query, boostClauses);
+
                     ClassLoader ldr = null;
                     GridKernalContext ctx = c.ctx;
 
                     if (ctx != null && ctx.deploy().enabled())
                         ldr = ctx.cache().internalCache(c.cacheName).context().deploy().globalLoader();
 
-                    iterator = new LuceneResultSet.It(c.searcher, query, c.objectContext(), ldr, columns.toArray(new Column[0]),20, offset, limit );
+                    iterator = new LuceneResultSet.It(c.searcher, query, null, c.objectContext(), ldr, columns.toArray(new Column[0]),20, offset, limit );
                 }
             } catch (IgniteCheckedException e) {
                 throw new SQLException(e);

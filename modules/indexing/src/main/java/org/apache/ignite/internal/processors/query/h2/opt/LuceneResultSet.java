@@ -16,6 +16,7 @@ import org.h2.util.New;
 import org.h2.util.Utils;
 import org.h2.value.DataType;
 
+import javax.jws.soap.SOAPBinding;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
@@ -2197,9 +2198,11 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
     protected static class It implements Iterator<Object[]>{
         private final int BatchPosBeforeHead = -1;
 
+        private final Sort sort;
         private final ClassLoader ldr;
 
         private final org.h2.table.Column[] columns;
+        private final Set<String> fields;
 
         private final int pageSize;
 
@@ -2222,14 +2225,22 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
 
         private CacheObjectContext coctx;
 
-        protected It(IndexSearcher searcher, Query query, CacheObjectContext objectContext, ClassLoader ldr, org.h2.table.Column[] columns, int pageSize, int offset, int limit)
+        protected It(IndexSearcher searcher, Query query, Sort sort, CacheObjectContext objectContext, ClassLoader ldr, org.h2.table.Column[] columns, int pageSize, int offset, int limit)
                 throws IgniteCheckedException {
             this.searcher = searcher;
             this.query = query;
+            this.sort = sort;
             this.ldr = ldr;
             this.columns = columns;
             this.pageSize = pageSize;
             this.remains = limit;
+            this.fields = new HashSet<>();
+
+            for(Column c : columns){
+                this.fields.add(c.getName());
+            }
+            this.fields.add(KEY_FIELD_NAME);
+
             coctx = objectContext;
             findNext();
             skip(offset);
@@ -2274,7 +2285,7 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
                 ScoreDoc scoreDoc =batch[batchPos++];
 
                 try {
-                    doc = searcher.doc(scoreDoc.doc);
+                    doc = searcher.doc(scoreDoc.doc, fields);
                 }
                 catch (IOException e) {
                     throw new IgniteCheckedException(e);
@@ -2291,7 +2302,9 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
 
                 assert v != null;
 
-                v[v.length-1] = scoreDoc.score;
+                v[v.length-1] = Float.isNaN(scoreDoc.score)
+                        ? null
+                        : scoreDoc.score;
 
                 curr = v;
 
@@ -2351,12 +2364,15 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
             int remains0 = Math.min(pageSize, this.remains);
 
             if (batch == null) {
-                docs = searcher.search(query, remains0);
+                docs = sort != null
+                        ? searcher.search(query, remains0, sort, true, true)
+                        : searcher.search(query, remains0);
             } else {
-                if(remains0 > 0){
-                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0);
-                }
-                else {
+                if (remains0 > 0) {
+                    docs = sort != null
+                            ? searcher.searchAfter(batch[batch.length - 1], query, remains0, sort, true, true)
+                            : searcher.searchAfter(batch[batch.length - 1], query, remains0);
+                } else {
                     docs = null;
                 }
             }

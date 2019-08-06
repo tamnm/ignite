@@ -264,7 +264,7 @@ public class GridH2RowDescriptor {
                     valArr[i] = o == null ? ValueNull.INSTANCE : wrap(o, DataType.getTypeFromClass(o.getClass()));
                 }
 
-                return NewValueArray.get(cls, valArr);
+                return ValueArray.get(cls, valArr);
 
             case Value.GEOMETRY:
                 return ValueGeometry.getFromGeometry(obj);

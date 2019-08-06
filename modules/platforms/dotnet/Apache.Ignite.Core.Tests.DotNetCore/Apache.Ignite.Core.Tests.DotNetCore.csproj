@@ -20,6 +20,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Include="..\Apache.Ignite.Core.Tests\ApiParity\BinaryParityTest.cs" Link="ApiParity\BinaryParityTest.cs" />
     <Compile Include="..\Apache.Ignite.Core.Tests\ApiParity\CacheAffinityParityTest.cs" Link="ApiParity\CacheAffinityParityTest.cs" />

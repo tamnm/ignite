@@ -46,6 +46,8 @@ import org.jetbrains.annotations.Nullable;
  * @see IgniteCache#query(Query)
  */
 public class SqlFieldsQuery extends Query<List<?>> {
+    private static final int DEFAULT_TIMEOUT = 5000;
+
     /** */
     private static final long serialVersionUID = 0L;
 
@@ -168,6 +170,9 @@ public class SqlFieldsQuery extends Query<List<?>> {
      * @return Timeout value.
      */
     public int getTimeout() {
+        if(timeout <=0)
+            return DEFAULT_TIMEOUT;
+
         return timeout;
     }
 

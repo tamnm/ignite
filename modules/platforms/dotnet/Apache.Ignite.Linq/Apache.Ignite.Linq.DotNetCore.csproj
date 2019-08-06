@@ -3,13 +3,21 @@
   <PropertyGroup>
     <TargetFramework>netcoreapp2.0</TargetFramework>
 	<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  <Version>2.7.0-beta002</Version>
+  <AssemblyVersion>2.7.0.002</AssemblyVersion>
+  <FileVersion>2.7.0.002</FileVersion>
 	<AssemblyName>Apache.Ignite.Linq</AssemblyName>
 	<RootNamespace>Apache.Ignite.Linq</RootNamespace>
     <NoWarn>NU1701</NoWarn>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>  
   
   <ItemGroup>
     <PackageReference Include="Remotion.Linq" Version="2.0.1" />
+  </ItemGroup>  
+  
+  <ItemGroup>
     <ProjectReference Include="..\Apache.Ignite.Core\Apache.Ignite.Core.DotNetCore.csproj" />
   </ItemGroup>
   

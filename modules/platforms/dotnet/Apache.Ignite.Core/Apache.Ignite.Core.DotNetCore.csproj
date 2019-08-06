@@ -5,6 +5,10 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <AssemblyName>Apache.Ignite.Core</AssemblyName>
     <RootNamespace>Apache.Ignite.Core</RootNamespace>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>2.7.0-beta005</Version>
+    <AssemblyVersion>2.7.0.005</AssemblyVersion>
+    <FileVersion>2.7.0.005</FileVersion>    
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="4.4.0" />

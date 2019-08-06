@@ -9,10 +9,14 @@ import java.util.Collection;
 
 class GridLuceneFieldFactory {
 
+    public static final String NUMERIC_FIELD_STORE_POSTFIX = "_STORED";
+
     private LuceneFieldFactory[] InternalFactories = new LuceneFieldFactory[]{
-        ArrayOfStringFactory.Instance,
-        ArrayOfNumberFactory.Instance,
+            ArrayOfStringFactory.Instance,
+            ArrayOfNumberFactory.Instance,
             LongFieldFactory.Instance,
+            BooleanFieldFactory.Instance,
+            StringFactory.Instance,
             DefaultFieldFactory.Instance
     };
 
@@ -23,6 +27,10 @@ class GridLuceneFieldFactory {
             }
         }
         return null;
+    }
+
+    public static String NumericStoredName(String fieldName){
+        return fieldName + GridLuceneFieldFactory.NUMERIC_FIELD_STORE_POSTFIX;
     }
 
     static final GridLuceneFieldFactory Instance = new GridLuceneFieldFactory();
@@ -55,6 +63,25 @@ class ArrayOfStringFactory implements LuceneFieldFactory{
     }
 
     static final LuceneFieldFactory Instance = new ArrayOfStringFactory();
+}
+
+class StringFactory implements LuceneFieldFactory{
+
+    @Override
+    public boolean validateField(Object fieldValue) {
+        return fieldValue instanceof String;
+    }
+
+    @Override
+    public Collection<IndexableField> createFields(String name, Object value) {
+        return new ArrayList<IndexableField>() {
+            {
+                add(PrimitiveFieldFactory.Instance.createTextField(name, value.toString()));
+            }
+        };
+    }
+
+    static final LuceneFieldFactory Instance = new StringFactory();
 }
 
 class ArrayOfNumberFactory implements LuceneFieldFactory{
@@ -98,6 +125,7 @@ class LongFieldFactory implements LuceneFieldFactory{
         return new ArrayList<IndexableField>() {
             {
                 add(PrimitiveFieldFactory.Instance.createNumberField(name, (Number) value));
+                add(PrimitiveFieldFactory.Instance.createStoredNumberField(name, (Number) value));
             }
         };
     }
@@ -105,14 +133,30 @@ class LongFieldFactory implements LuceneFieldFactory{
     static final LuceneFieldFactory Instance = new LongFieldFactory();
 }
 
+class BooleanFieldFactory implements LuceneFieldFactory{
+
+    @Override
+    public boolean validateField(Object fieldValue) {
+        return fieldValue instanceof Boolean;
+    }
+
+    @Override
+    public Collection<IndexableField> createFields(String name, Object value) {
+        return new ArrayList<IndexableField>() {
+            {
+                add(PrimitiveFieldFactory.Instance.createStringField(name, value.toString()));
+            }
+        };
+    }
+
+    static final LuceneFieldFactory Instance = new BooleanFieldFactory();
+}
+
 class PrimitiveFieldFactory{
-    IndexableField createTextField(String name, String value){
-        return new TextField(name, value, Field.Store.NO);
-    }
-    IndexableField createStringField(String name, String value){
-        return new StringField(name, value, Field.Store.NO);
-    }
-    IndexableField createNumberField(String name, Number number){ return new LongPoint(name, number.longValue()); }
+    IndexableField createTextField(String name, String value){ return new TextField(name, value.toLowerCase(), Field.Store.YES); }
+    IndexableField createStringField(String name, String value){ return new StringField(name, value, Field.Store.YES); }
+    IndexableField createNumberField(String name, Number value){ return new DoublePoint(name, value.doubleValue());  }
+    IndexableField createStoredNumberField(String name, Number value){ return new StoredField(GridLuceneFieldFactory.NumericStoredName(name), value.doubleValue()); }
 
     static final PrimitiveFieldFactory Instance = new PrimitiveFieldFactory();
 }
@@ -129,7 +173,7 @@ class DefaultFieldFactory implements LuceneFieldFactory{
 
         return new ArrayList<IndexableField>() {
             {
-                add(PrimitiveFieldFactory.Instance.createTextField(name, value.toString()));
+                add(PrimitiveFieldFactory.Instance.createStringField(name, value.toString()));
             }
         };
     }

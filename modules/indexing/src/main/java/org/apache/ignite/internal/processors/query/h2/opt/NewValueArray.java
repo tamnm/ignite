@@ -6,6 +6,7 @@ import org.h2.util.New;
 import org.h2.util.StatementBuilder;
 import org.h2.value.CompareMode;
 import org.h2.value.Value;
+import org.h2.value.ValueArray;
 
 import java.lang.reflect.Array;
 import java.sql.PreparedStatement;
@@ -118,6 +119,28 @@ public class NewValueArray extends Value {
 
         for(int var3 = 0; var3 < var1; ++var3) {
             Value var4 = this.values[var3];
+            if (!SysProperties.OLD_RESULT_SET_GET_OBJECT) {
+                int var5 = var4.getType();
+                if (var5 == 2 || var5 == 3) {
+                    Array.set(var2,var3, var4.getInt());
+                    continue;
+                }
+            }
+
+            Array.set(var2,var3, var4.getObject());
+        }
+
+        return var2;
+    }
+
+    public static Object getObject(ValueArray valueArray) {
+        Value[] values = valueArray.getList();
+
+        int var1 = values.length;
+        Object var2 = Array.newInstance(valueArray.getComponentType(), var1);
+
+        for(int var3 = 0; var3 < var1; ++var3) {
+            Value var4 = values[var3];
             if (!SysProperties.OLD_RESULT_SET_GET_OBJECT) {
                 int var5 = var4.getType();
                 if (var5 == 2 || var5 == 3) {
