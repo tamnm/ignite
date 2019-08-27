@@ -155,6 +155,12 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <param name="sqlQuery">SQL query.</param>
         /// <returns>Query cursor.</returns>
         IQueryCursor<ICacheEntry<TK, TV>> Query(SqlQuery sqlQuery);
+
+        /// <summary>
+        /// Executes an SQL query.
+        /// </summary>
+        /// <param name="sqlQuery">SQL query.</param>
+        /// <returns>Query cursor.</returns>
         Task<IQueryCursor<ICacheEntry<TK, TV>>> QueryAsync(SqlQuery sqlQuery);
 
         /// <summary>
@@ -163,6 +169,12 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <param name="sqlFieldsQuery">SQL query.</param>
         /// <returns>Query cursor.</returns>
         IFieldsQueryCursor Query(SqlFieldsQuery sqlFieldsQuery);
+        
+        /// <summary>
+        /// Executes an SQL Fields query.
+        /// </summary>
+        /// <param name="sqlFieldsQuery">SQL query.</param>
+        /// <returns>Query cursor.</returns>
         Task<IFieldsQueryCursor> QueryAsync(SqlFieldsQuery sqlFieldsQuery);
 
         /// <summary>
@@ -172,6 +184,11 @@ namespace Apache.Ignite.Core.Client.Cache
         /// <returns>Query cursor.</returns>
         IQueryCursor<ICacheEntry<TK, TV>>  Query(TextQuery textQuery);
 
+        /// <summary>
+        /// Executes an Text query.
+        /// </summary>
+        /// <param name="textQuery">Text query.</param>
+        /// <returns>Query cursor.</returns>
         Task<IQueryCursor<ICacheEntry<TK, TV>>>  QueryAsync(TextQuery textQuery);
 
         /// <summary>

@@ -155,7 +155,7 @@ class BooleanFieldFactory implements LuceneFieldFactory{
 class PrimitiveFieldFactory{
     IndexableField createTextField(String name, String value){ return new TextField(name, value.toLowerCase(), Field.Store.YES); }
     IndexableField createStringField(String name, String value){ return new StringField(name, value, Field.Store.YES); }
-    IndexableField createNumberField(String name, Number value){ return new DoublePoint(name, value.doubleValue());  }
+    IndexableField createNumberField(String name, Number value){ return new LongPoint(name, value.longValue());  }
     IndexableField createStoredNumberField(String name, Number value){ return new StoredField(GridLuceneFieldFactory.NumericStoredName(name), value.doubleValue()); }
 
     static final PrimitiveFieldFactory Instance = new PrimitiveFieldFactory();
