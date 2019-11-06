@@ -21,6 +21,7 @@ namespace Apache.Ignite.Core.Impl.Binary
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
+    using System.Linq;
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Impl.Client;
 
@@ -188,7 +189,7 @@ namespace Apache.Ignite.Core.Impl.Binary
 
             int cnt = 0;
 
-            foreach (var pair in vals)
+            foreach (var pair in vals.OrderBy(x=>x.Key)) //workaround to prevent deadlock when put all
             {
                 writer.WriteObjectDetached(pair.Key);
                 writer.WriteObjectDetached(pair.Value);
