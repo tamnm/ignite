@@ -35,7 +35,7 @@ using System.Runtime.InteropServices;
 
 [assembly: AssemblyVersion("2.7.0.33575")]
 [assembly: AssemblyFileVersion("2.7.0.33575")]
-[assembly: AssemblyInformationalVersion("2.7.0")]
+[assembly: AssemblyInformationalVersion("2.7.0-beta006")]
 
 [assembly: CLSCompliant(true)]
 

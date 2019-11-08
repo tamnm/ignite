@@ -2229,7 +2229,7 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
                 throws IgniteCheckedException {
             this.searcher = searcher;
             this.query = query;
-            this.sort = sort;
+            this.sort = sort == null ? Sort.RELEVANCE : sort;
             this.ldr = ldr;
             this.columns = columns;
             this.pageSize = pageSize;
@@ -2364,14 +2364,10 @@ public class LuceneResultSet implements ResultSet,ResultSetMetaData {
             int remains0 = Math.min(pageSize, this.remains);
 
             if (batch == null) {
-                docs = sort != null
-                        ? searcher.search(query, remains0, sort, true, true)
-                        : searcher.search(query, remains0);
+                docs = searcher.search(query, remains0, sort, true, true);
             } else {
                 if (remains0 > 0) {
-                    docs = sort != null
-                            ? searcher.searchAfter(batch[batch.length - 1], query, remains0, sort, true, true)
-                            : searcher.searchAfter(batch[batch.length - 1], query, remains0);
+                    docs = searcher.searchAfter(batch[batch.length - 1], query, remains0, sort, true, true);
                 } else {
                     docs = null;
                 }

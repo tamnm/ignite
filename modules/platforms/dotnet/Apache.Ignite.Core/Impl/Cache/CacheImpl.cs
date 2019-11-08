@@ -945,7 +945,7 @@ namespace Apache.Ignite.Core.Impl.Cache
 
         }
 
-        /** <inheritDoc /> */
+     
         public T DoOutInOpExtension<T>(int extensionId, int opCode, Action<IBinaryRawWriter> writeAction,
             Func<IBinaryRawReader, T> readFunc)
         {
@@ -1109,6 +1109,25 @@ namespace Apache.Ignite.Core.Impl.Cache
 
             return new FieldsQueryCursor<T>(cursor, _flagKeepBinary, readerFunc);
         }
+        
+        /** <inheritDoc /> */
+        public Task<IQueryCursor<T>> QueryAsync<T>(SqlFieldsQuery qry, Func<IBinaryRawReader, int, T> readerFunc)
+        {
+            var future = QueryFieldsInternalAsync(qry);
+            
+            return OnFutureCallback<IPlatformTargetInternal,IQueryCursor<T>>(future.Task, r => new FieldsQueryCursor<T>(r, _flagKeepBinary, readerFunc));
+        }
+
+        private Task<TResponse> OnFutureCallback<TFuture,TResponse>(Task<TFuture> future, Func<TFuture,TResponse> callback)
+        {
+            return future.ContinueWith(task =>
+            {
+                if (task.Status == TaskStatus.RanToCompletion)
+                    return callback(future.Result);
+
+                throw task.Exception ?? new Exception("Generic task fail: " + future.Status);
+            });
+        }
 
         private IPlatformTargetInternal QueryFieldsInternal(SqlFieldsQuery qry)
         {
@@ -1118,6 +1137,31 @@ namespace Apache.Ignite.Core.Impl.Cache
                 throw new ArgumentException("Sql cannot be null or empty");
 
             return DoOutOpObject((int) CacheOp.QrySqlFields, writer =>
+            {
+                writer.WriteBoolean(qry.Local);
+                writer.WriteString(qry.Sql);
+                writer.WriteInt(qry.PageSize);
+
+                QueryBase.WriteQueryArgs(writer, qry.Arguments);
+
+                writer.WriteBoolean(qry.EnableDistributedJoins);
+                writer.WriteBoolean(qry.EnforceJoinOrder);
+                writer.WriteBoolean(qry.Lazy); // Lazy flag.
+                writer.WriteInt((int) qry.Timeout.TotalMilliseconds);
+                writer.WriteBoolean(qry.ReplicatedOnly);
+                writer.WriteBoolean(qry.Colocated);
+                writer.WriteString(qry.Schema); // Schema
+            });
+        }
+        
+        private Future<IPlatformTargetInternal> QueryFieldsInternalAsync(SqlFieldsQuery qry)
+        {
+            IgniteArgumentCheck.NotNull(qry, "qry");
+
+            if (string.IsNullOrEmpty(qry.Sql))
+                throw new ArgumentException("Sql cannot be null or empty");
+
+            return DoOutOpObjectAsync<IPlatformTargetInternal>((int) CacheOp.QrySqlFields, writer =>
             {
                 writer.WriteBoolean(qry.Local);
                 writer.WriteString(qry.Sql);

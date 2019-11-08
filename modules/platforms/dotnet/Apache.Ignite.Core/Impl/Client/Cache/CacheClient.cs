@@ -279,6 +279,13 @@ namespace Apache.Ignite.Core.Impl.Client.Cache
                 s => GetFieldsCursorNoColumnNames(s, readerFunc));
         }
 
+        public Task<IQueryCursor<T>> QueryAsync<T>(SqlFieldsQuery qry, Func<IBinaryRawReader, int, T> readerFunc)
+        {
+            return DoOutInOpAsync<IQueryCursor<T>>(ClientOp.QuerySqlFields,
+                w => WriteSqlFieldsQuery(w, qry, false),
+                s => GetFieldsCursorNoColumnNames(s, readerFunc));
+        }
+
         /** <inheritDoc /> */
         public CacheResult<TV> GetAndPut(TK key, TV val)
         {

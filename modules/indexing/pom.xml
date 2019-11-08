@@ -126,6 +126,12 @@
             <version>${guava.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.github.magese</groupId>
+            <artifactId>ik-analyzer</artifactId>
+            <version>7.4.0</version>
+        </dependency>        
     </dependencies>
 
     <build>

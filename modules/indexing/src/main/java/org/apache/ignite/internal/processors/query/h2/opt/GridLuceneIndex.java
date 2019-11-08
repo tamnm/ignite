@@ -49,10 +49,8 @@ import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.spi.indexing.IndexingQueryFilter;
 import org.apache.ignite.spi.indexing.IndexingQueryCacheFilter;
 import org.apache.lucene.analysis.*;
-import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
-import org.apache.lucene.analysis.miscellaneous.LengthFilter;
-import org.apache.lucene.analysis.ngram.NGramTokenFilter;
-import org.apache.lucene.analysis.standard.StandardTokenizer;
+import org.apache.lucene.analysis.ngram.EdgeNGramTokenFilter;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.LongPoint;
@@ -71,6 +69,7 @@ import org.h2.jdbc.JdbcConnection;
 import org.h2.table.Column;
 import org.h2.util.JdbcUtils;
 import org.jetbrains.annotations.Nullable;
+import org.wltea.analyzer.lucene.IKTokenizer;
 
 import static org.apache.ignite.internal.processors.query.QueryUtils.KEY_FIELD_NAME;
 
@@ -114,7 +113,13 @@ public class GridLuceneIndex implements AutoCloseable {
     private Analyzer queryAnalyzer;
 
     /** */
+    private final Map<String, Class> entityFields = new HashMap<>();
+
+    /** */
     private final String[] idxdFields;
+
+    /** */
+    private final String[] queryingFields;
 
     /** */
     private final AtomicLong updateCntr = new GridAtomicLong();
@@ -145,10 +150,19 @@ public class GridLuceneIndex implements AutoCloseable {
         List<String> keyFields = new ArrayList<>();
 
         for(QueryEntity qe : cacheConfig.getQueryEntities()) {
+
             Set<String> qeKeyFields = qe.getKeyFields();
             if(qeKeyFields != null)
             for(String k : qeKeyFields){
                 keyFields.add(k.toUpperCase());
+            }
+
+            for(Map.Entry<String,String> abc  : qe.getFields().entrySet()){
+                try {
+                    entityFields.put(abc.getKey().toUpperCase(), Class.forName(abc.getValue()));
+                } catch (ClassNotFoundException e) {
+                    entityFields.put(abc.getKey().toUpperCase(), Object.class);
+                }
             }
         }
 
@@ -165,17 +179,12 @@ public class GridLuceneIndex implements AutoCloseable {
                             ? FSDirectory.open(path)
                             : new GridLuceneDirectory(new GridUnsafeMemory(0));
 
-            Analyzer analyzer = new Analyzer() {
-
+            Analyzer analyzer = queryAnalyzer =new Analyzer() {
                 @Override
                 protected TokenStreamComponents createComponents(String fieldName) {
-                    Tokenizer tokenizer = new StandardTokenizer();
-
-                    TokenStream stream = tokenizer;
-
-                    stream = new NGramTokenFilter(stream, 2, 20, false);
-                    stream = new ASCIIFoldingFilter(stream);
-                    stream = new LowerCaseFilter(stream);
+                    Tokenizer tokenizer = new IKTokenizer();
+                    TokenStream stream;
+                    stream = new EdgeNGramTokenFilter(tokenizer,1, 20, true);
                     return new TokenStreamComponents(tokenizer, stream);
                 }
             };
@@ -187,14 +196,9 @@ public class GridLuceneIndex implements AutoCloseable {
 
             queryAnalyzer =  new Analyzer() {
                 @Override
-                protected TokenStreamComponents createComponents(String s) {
-                    Tokenizer tokenizer = new StandardTokenizer();
-
-                    TokenStream stream = tokenizer;
-                    stream = new ASCIIFoldingFilter(stream);
-                    stream = new LowerCaseFilter(stream);
-                    stream = new LengthFilter(stream, 2,20);
-                    return new TokenStreamComponents(tokenizer, stream);
+                protected TokenStreamComponents createComponents(String fieldName) {
+                    Tokenizer tokenizer = new IKTokenizer();
+                    return new TokenStreamComponents(tokenizer);
                 }
             };
 
@@ -212,6 +216,7 @@ public class GridLuceneIndex implements AutoCloseable {
         GridQueryIndexDescriptor idx = type.textIndex();
 
         if (idx != null) {
+
             Collection<String> fields = idx.fields();
 
             idxdFields = new String[fields.size() + 1];
@@ -225,8 +230,22 @@ public class GridLuceneIndex implements AutoCloseable {
         }
 
         idxdFields[idxdFields.length - 1] = VAL_STR_FIELD_NAME;
+        queryingFields = getQueryingFields(idxdFields);
 
         luceneIndexes.put(cacheName, this);
+    }
+
+    private String[] getQueryingFields(String[] fields) {
+        ArrayList<String> arrayList = new ArrayList<>();
+
+        for(String indexField : fields){
+            if(entityFields.containsKey(indexField)){
+                Class cls = entityFields.get(indexField);
+                arrayList.addAll(GridLuceneFieldFactory.Instance.getGeneratedIndexableName(indexField, cls));
+            }
+        }
+
+        return arrayList.toArray(new String[0]);
     }
 
     private boolean isNewCache(GridKernalContext ctx, @Nullable String cacheName){
@@ -401,56 +420,13 @@ public class GridLuceneIndex implements AutoCloseable {
         return new Pair<>(property, rate);
     }
 
-    protected Sort parseSort(String orderClauses) throws IgniteCheckedException {
-        if(orderClauses == null){
-            return null;
-        }
-
-        ArrayList<SortField> sortFields = new ArrayList<>();
-
-        String[] orderByClauses = orderClauses.split(",");
-
-        sortFields.add(SortField.FIELD_SCORE);
-
-        for (String orderByClause : orderByClauses) {
-            sortFields.add(parseSortField(orderByClause));
-        }
-
-        return new Sort(sortFields.toArray(new SortField[0]));
-    }
-
-    private static SortField parseSortField(String orderClause) throws IgniteCheckedException {
-            String[] arr = orderClause.split(" ");
-            String column = null;
-            boolean desc = false;
-
-            for (int i = 0; i < arr.length; i++) {
-                String text = arr[i];
-                if(text == null || text.equals("")) continue;
-                if(column == null) {
-                    column = text;
-                }
-                else {
-                    if(text.equalsIgnoreCase(QUERY_SORT_ASC) || text.equalsIgnoreCase(QUERY_SORT_DESC)){
-                        desc =  text.equalsIgnoreCase(QUERY_SORT_DESC);
-                    }else{
-                        throw new IgniteCheckedException("Bad order clause");
-                    }
-                }
-            }
-
-            if(column == null)
-            throw new IgniteCheckedException("Bad order clause");
-
-        return new SortedNumericSortField(column+"_SORTER",  SortField.Type.LONG, desc);
-    }
 
     protected Query parseQuery(String qry) throws IgniteCheckedException {
         Query query;
 
         try {
 
-            MultiFieldQueryParser parser = new LongPointRangeQueryParser(idxdFields, queryAnalyzer);
+            MultiFieldQueryParser parser = new LongPointRangeQueryParser(queryingFields, queryAnalyzer);
 
 //            parser.setAllowLeadingWildcard(true);
 
@@ -458,7 +434,7 @@ public class GridLuceneIndex implements AutoCloseable {
             Query filter = LongPoint.newRangeQuery(EXPIRATION_TIME_FIELD_NAME, U.currentTimeMillis(), Long.MAX_VALUE);
 
             query = new BooleanQuery.Builder()
-                .add(parser.parse(qry), BooleanClause.Occur.MUST)
+                .add(parser.parse(GridLuceneFieldFactory.TextUtils.normalize(qry)), BooleanClause.Occur.MUST)
                 .add(filter, BooleanClause.Occur.FILTER)
                 .build();
         }
